@@ -1,13 +1,24 @@
 """MeshCore Chat companion integration for Home Assistant.
 
-The companion subscribes to events fired by the upstream ``meshcore``
-integration (``meshcore_message``, ``meshcore_delivery_update``,
-``meshcore_connected``, ``meshcore_disconnected``) and persists each
-chat message to a per-conversation store. The frontend (Phase 3) reads
-through ``meshcore_chat/*`` WebSocket commands and *sends* via the
-upstream ``meshcore.*`` services — never via this integration.
+Two responsibilities at runtime:
 
-Phase 2 scope: backend only. No config-flow promotion, no panel/frontend.
+  1. Per-entry message-store backend. Subscribes to events fired by the
+     upstream ``meshcore`` integration (``meshcore_message``,
+     ``meshcore_delivery_update``, ``meshcore_connected``,
+     ``meshcore_disconnected``) and persists each chat message to a
+     per-conversation store. Exposes the ``meshcore_chat/*`` WebSocket
+     command namespace and an UnreadTracker singleton.
+
+  2. Process-global sidebar panel registration. The Lit/TypeScript
+     panel (under ``frontend/``) is served from this integration and
+     registered once per HA process; entries beyond the first re-use
+     the existing registration. The panel reads message history through
+     the WS commands above and *sends* new messages via the upstream
+     ``meshcore.send_*`` services — never via this integration.
+
+The hard manifest dependency on ``meshcore`` (since 4e65769) plus the
+config-flow abort (since 594c9aa) guarantee the upstream integration is
+present whenever ``async_setup_entry`` runs here.
 """
 from __future__ import annotations
 
@@ -25,6 +36,7 @@ from .const import (
     EVENT_MESHCORE_MESSAGE,
 )
 from .message_store import MessageStore
+from .panel import async_register_panel, async_remove_panel
 from .unread_tracking import UnreadTracker
 from .ws_api import async_register_ws_commands
 
@@ -34,12 +46,28 @@ _LOGGER = logging.getLogger(__name__)
 # event listeners we register. Cleared in async_unload_entry.
 _LISTENERS_KEY = "listeners"
 
+# Domain-bucket flag keys (as opposed to per-entry sub-dicts). Used by
+# async_unload_entry to distinguish "another entry is still around" from
+# "only flags remain — safe to tear down process-global state".
+_DOMAIN_FLAGS = frozenset(
+    {"_panel_registered", "_ws_registered", "unread_tracker"}
+)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up MeshCore Chat from a config entry."""
     bucket = hass.data.setdefault(DOMAIN, {})
     entry_bucket: dict[str, Any] = {}
     bucket[entry.entry_id] = entry_bucket
+
+    # Process-global: register the sidebar panel exactly once. The panel
+    # is not per-entry — the config-flow is single-instance, so in practice
+    # this is also one-per-config-entry, but the guard protects against
+    # accidental re-registration if that invariant ever changes.
+    if not bucket.get("_panel_registered"):
+        await async_register_panel(hass)
+        bucket["_panel_registered"] = True
+        _LOGGER.debug("MeshCore Chat panel registered")
 
     # Initialize the per-entry message store and load its lightweight index.
     store = MessageStore(hass, entry)
@@ -99,10 +127,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Tear down a config entry."""
-    entry_bucket = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    bucket = hass.data.get(DOMAIN, {})
+    entry_bucket = bucket.pop(entry.entry_id, None)
     if not entry_bucket:
         return True
 
+    # Per-entry teardown: unsubscribe event listeners and unload the store.
     for unsub in entry_bucket.get(_LISTENERS_KEY, []):
         try:
             unsub()
@@ -112,6 +142,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store: MessageStore | None = entry_bucket.get("store")
     if store is not None:
         await store.async_unload()
+
+    # If this was the last config entry, drop the process-global state
+    # too (panel registration, WS commands, UnreadTracker). After popping
+    # this entry, anything left in the bucket that *isn't* a known flag
+    # means another entry is still live.
+    remaining = [k for k in bucket if k not in _DOMAIN_FLAGS]
+    if not remaining:
+        if bucket.get("_panel_registered"):
+            await async_remove_panel(hass)
+            bucket.pop("_panel_registered", None)
+            _LOGGER.debug("MeshCore Chat panel removed (last entry unloaded)")
+        # WS commands and UnreadTracker live for the lifetime of the HA
+        # process — there's no public unregister API for either, and re-
+        # registering after a re-add of the integration is guarded above.
+        # We deliberately leave _ws_registered and unread_tracker in
+        # place so a subsequent async_setup_entry doesn't try to re-register.
 
     return True
 
