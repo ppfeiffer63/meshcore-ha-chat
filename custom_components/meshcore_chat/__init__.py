@@ -39,6 +39,7 @@ from .const import (
 from .message_store import MessageStore
 from .panel import async_register_panel, async_remove_panel
 from .unread_tracking import UnreadTracker
+from .utils import enrich_rx_log_entries
 from .ws_api import async_register_ws_commands
 
 _LOGGER = logging.getLogger(__name__)
@@ -242,13 +243,26 @@ def _make_message_handler(hass: HomeAssistant, entry_id: str):
             if k in data:
                 record[k] = data[k]
 
-        # Default delivery_status: "sent" for inbound, "pending" for outbound
-        # without an explicit ack signal. Don't override if the upstream
-        # event already set one.
-        record.setdefault(
-            "delivery_status",
-            "sent" if not record["outgoing"] else "pending",
-        )
+        # Backfill path_nodes/hop_count on rx_log entries — companion-supporting
+        # dev/combined emits `path` + `path_len` but not the convenience fields
+        # the frontend reads. Mirrors what feature/sidebar-panel did at source.
+        if record.get("rx_log_data"):
+            enrich_rx_log_entries(record["rx_log_data"])
+
+        # Default delivery_status. The upstream EVENT_MESHCORE_MESSAGE for
+        # outgoing fires AFTER its 4-second progressive RX_LOG collection
+        # window (handle_outgoing_message in upstream logbook.py) — so by
+        # the time we see it, the message has been transmitted and is
+        # definitively "sent". For DMs, ack_received is authoritative when
+        # present. Channel messages never have ack_received.
+        if record["outgoing"]:
+            ack = data.get("ack_received")
+            record.setdefault(
+                "delivery_status",
+                "delivered" if ack is True else "sent",
+            )
+        else:
+            record.setdefault("delivery_status", "sent")
 
         await store.store_message(entity_id, record)
 
@@ -282,19 +296,46 @@ def _make_delivery_update_handler(hass: HomeAssistant, entry_id: str):
         if not msg_id:
             return
 
-        status = data.get("delivery_status") or (
-            "sent" if data.get("ack_received") else "pending"
-        )
+        # Progressive updates are intermediate enrichment fired from
+        # handle_outgoing_message's collection passes — they carry rx_log
+        # data accumulated so far but never carry an authoritative
+        # delivery_status. If we computed a status from a progressive
+        # event we'd downgrade an already-"sent" message back to "pending"
+        # and the bubble would flip to "Waiting…" mid-flight. So for
+        # progressive events, only the rx_log/repeater_count fields are
+        # written; delivery_status is left to whatever the final
+        # EVENT_MESHCORE_MESSAGE established.
+        progressive = bool(data.get("progressive"))
+
+        explicit_status = data.get("delivery_status")
+        if explicit_status:
+            status = explicit_status
+        elif progressive:
+            status = None  # don't touch
+        else:
+            status = "sent" if data.get("ack_received") else "pending"
+
         kwargs: dict[str, Any] = {}
         for k in ("rx_log_data", "repeater_count", "ack_received"):
             if k in data:
                 kwargs[k] = data[k]
 
+        # Enrich rx_log entries (path_nodes/hop_count derived from path/path_len)
+        # before any persistence so updates and the rx_log mirror stay aligned
+        # with what _make_message_handler writes.
+        if "rx_log_data" in kwargs and kwargs["rx_log_data"]:
+            enrich_rx_log_entries(kwargs["rx_log_data"])
+
         entity_id = data.get("entity_id")
         if entity_id:
-            await store.update_message_delivery(
-                entity_id, msg_id, status, **kwargs
-            )
+            if status is not None:
+                await store.update_message_delivery(
+                    entity_id, msg_id, status, **kwargs
+                )
+            elif kwargs:
+                # Status untouched, but still propagate rx_log/repeater_count
+                # as a metadata-only update via the rx_data path below.
+                pass
             # Some delivery updates carry the final rx_log_data — keep both
             # the rx_log mirror and the delivery row in sync.
             if "rx_log_data" in kwargs:
@@ -303,9 +344,11 @@ def _make_delivery_update_handler(hass: HomeAssistant, entry_id: str):
                 )
         else:
             # Pre-PR-B: scan all conversations.
-            located = await store.update_message_delivery_any(
-                msg_id, status, **kwargs
-            )
+            located = None
+            if status is not None:
+                located = await store.update_message_delivery_any(
+                    msg_id, status, **kwargs
+                )
             if located and "rx_log_data" in kwargs:
                 await store.update_message_rx_data(
                     located, msg_id, kwargs["rx_log_data"]
