@@ -4,6 +4,8 @@ Sidebar chat panel and persistent message store for the MeshCore mesh radio netw
 
 A **companion** integration: works alongside the [core meshcore integration](https://github.com/meshcore-dev/meshcore-ha) without modifying it. Install both.
 
+![MeshCore Chat panel](https://raw.githubusercontent.com/mwolter805/meshcore-ha-chat/main/docs/screenshots/chat-tab.jpg)
+
 **Features:**
 
 - Sidebar chat panel — channels, DMs, contacts
