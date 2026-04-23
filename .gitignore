@@ -7,8 +7,13 @@ __pycache__/
 
 # Node / frontend build cache
 node_modules/
-dist/
 .rollup.cache/
+
+# Ignore generic dist/ (Python builds, etc.) but DO track the panel
+# bundle — HACS users install the prebuilt artifact and never run npm.
+dist/
+!custom_components/meshcore_chat/frontend/dist/
+!custom_components/meshcore_chat/frontend/dist/**
 
 # OS
 .DS_Store
