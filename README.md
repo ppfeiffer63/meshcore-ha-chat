@@ -46,19 +46,24 @@ Works as a **companion** to the [core meshcore integration](https://github.com/m
 <table>
 <tr>
 <td width="50%"><a href="docs/screenshots/chat-popup.jpg"><img src="docs/screenshots/chat-popup.jpg" alt="Message popup with route metadata"></a></td>
+<td width="50%"><a href="docs/screenshots/manage-contacts-channels.jpg"><img src="docs/screenshots/manage-contacts-channels.jpg" alt="Manage contacts and channels"></a></td>
+</tr>
+<tr>
+<td><b>Message popup</b> — click or tap any message for Copy / Reply, plus the route metadata: hop sequence, SNR, RSSI, and exact receive timestamp.</td>
+<td><b>Manage contacts &amp; channels</b> — promote any discovered node to an Added contact, or remove it; channel list lives on the second tab.</td>
+</tr>
+</table>
+
+### Nodes features
+
+<table>
+<tr>
+<td width="50%"><a href="docs/screenshots/node-popup.jpg"><img src="docs/screenshots/node-popup.jpg" alt="Node detail popup"></a></td>
 <td width="50%"><a href="docs/screenshots/trace-dialog.jpg"><img src="docs/screenshots/trace-dialog.jpg" alt="Path trace dialog"></a></td>
 </tr>
 <tr>
-<td><b>Message popup</b> — long-press any message for Copy / Reply, plus the route metadata: hop sequence, SNR, RSSI, and exact receive timestamp.</td>
-<td><b>Path trace</b> — pick repeaters in order to test a multi-hop path, or run a direct-neighbor probe; resolved path is shown alongside.</td>
-</tr>
-<tr>
-<td><a href="docs/screenshots/manage-contacts-channels.jpg"><img src="docs/screenshots/manage-contacts-channels.jpg" alt="Manage contacts and channels"></a></td>
-<td><a href="docs/screenshots/node-popup.jpg"><img src="docs/screenshots/node-popup.jpg" alt="Node detail popup"></a></td>
-</tr>
-<tr>
-<td><b>Manage contacts &amp; channels</b> — promote any discovered node to an Added contact, or remove it; channel list lives on the second tab.</td>
-<td><b>Node details</b> — quick actions (Trace, Remove Contact), public-key prefix, type, last advert, and location for any discovered node.</td>
+<td><b>Node details</b> — click any node tile in the Nodes tab to open quick actions (Trace, Remove Contact), public-key prefix, type, last advert, and location.</td>
+<td><b>Path trace</b> — launched from the Trace quick action in the Node details dialog; pick repeaters in order to test a multi-hop path, or run a direct-neighbor probe; resolved path is shown alongside.</td>
 </tr>
 </table>
 
