@@ -380,7 +380,11 @@ export class MessageBubble extends LitElement {
             } else if (hops !== undefined) {
               parts.push(`${hops} hop${hops !== 1 ? 's' : ''}`);
             } else {
-              parts.push('direct');
+              // No path_nodes / hop_count → packet was heard directly by
+              // the local node. Label as "0 hops" rather than "direct" so
+              // it isn't confusable with the "direct message" message-type
+              // for channel broadcasts that happened to be in radio range.
+              parts.push('0 hops');
             }
             if (snr !== undefined) parts.push(`SNR: ${snr}`);
             if (rssi !== undefined) parts.push(`RSSI: ${rssi}`);

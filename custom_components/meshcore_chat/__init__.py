@@ -22,6 +22,7 @@ present whenever ``async_setup_entry`` runs here.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -197,14 +198,21 @@ def _make_message_handler(hass: HomeAssistant, entry_id: str):
 
         msg_id = _store_message_id(data)
         if not msg_id:
-            # Fall back to a synthetic id from the event tuple. The store
-            # dedups by id within the recent window, so identical tuples
-            # won't double-store.
-            msg_id = (
-                f"{data.get('timestamp', '')}|"
-                f"{data.get('sender_name', '')}|"
-                f"{(data.get('message') or '')[:64]}"
-            )
+            # Fall back to a synthetic id from the event tuple, hashed the
+            # same way the frontend's generateId() in message-parser.ts
+            # does — sha256(f"{timestamp}|{sender}|{message}")[:12]. This
+            # matters for live-bubble dedup: the panel renders an "rt_"
+            # bubble immediately on the meshcore_message event using its
+            # own hash, and reconciles against stored ids on the next
+            # fetch. If the stored id is anything other than that exact
+            # 12-hex digest, the rt_ bubble cannot be matched and stays
+            # alongside the fetched copy → duplicate bubbles until the
+            # message-store is rebuilt (e.g. on conversation switch).
+            ts = data.get("timestamp", "")
+            sender = data.get("sender_name", "")
+            text = data.get("message") or data.get("text") or ""
+            raw = f"{ts}|{sender}|{text}"
+            msg_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
         # Build the stored record from whatever fields the event carries.
         # Per Adaptation 4 in the proposal, missing fields like hop_count
