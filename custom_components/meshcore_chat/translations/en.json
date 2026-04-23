@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "MeshCore Chat",
+        "description": "Add the MeshCore Chat companion integration. The core meshcore integration must also be installed for the panel to receive messages."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "MeshCore Chat is already configured."
+    }
+  }
+}
