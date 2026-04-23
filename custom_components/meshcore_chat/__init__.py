@@ -25,6 +25,7 @@ from .const import (
     EVENT_MESHCORE_MESSAGE,
 )
 from .message_store import MessageStore
+from .unread_tracking import UnreadTracker
 from .ws_api import async_register_ws_commands
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,6 +54,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.warning(
             "MessageStore retention cleanup failed at startup: %s", ex
         )
+
+    # Unread tracker is a process-wide singleton (not per-entry) — the
+    # frontend identifies conversations by entity_id, which is globally
+    # unique across config entries. Stash it on the domain bucket where the
+    # WS handlers expect to find it (hass.data[DOMAIN]["unread_tracker"]).
+    if "unread_tracker" not in bucket:
+        bucket["unread_tracker"] = UnreadTracker(hass)
 
     # Register WS commands once (idempotent registration would be ideal but
     # HA's websocket_api raises on duplicate types — guard with a flag on the
@@ -189,6 +197,15 @@ def _make_message_handler(hass: HomeAssistant, entry_id: str):
         )
 
         await store.store_message(entity_id, record)
+
+        # Inbound (non-outgoing) messages increment the unread count for
+        # this conversation. Frontend listens on EVENT_UNREAD_UPDATED and
+        # updates the per-conversation badge; the panel calls
+        # meshcore_chat/mark_conversation_read to clear it on read.
+        if not record["outgoing"]:
+            tracker = hass.data.get(DOMAIN, {}).get("unread_tracker")
+            if tracker is not None:
+                await tracker.mark_unread(entity_id)
 
     return _handle
 

@@ -42,3 +42,21 @@ MESSAGE_STORE_IDLE_EVICTION_SECONDS: Final = 300  # 5 minutes
 # Config-entry option keys (read from entry.options with the defaults above).
 OPT_MAX_MESSAGES_PER_CONVERSATION: Final = "max_messages_per_conversation"
 OPT_MESSAGE_RETENTION_DAYS: Final = "message_retention_days"
+
+# ─── Constants used by the lifted ws_api.py / utils helpers ─────────────────
+# HA entity-domain string used by helpers that build entity_ids for binary
+# sensors created by the upstream integration. Not the companion's domain.
+ENTITY_DOMAIN_BINARY_SENSOR: Final = "binary_sensor"
+
+# Default age (days) at which a neighbor entry is considered stale and
+# eligible for cleanup via meshcore_chat/cleanup_stale_neighbors. Mirrors
+# the upstream meshcore.const value of the same name; lifted here so the
+# companion's ws_api.py can self-import it without coupling to upstream's
+# const module.
+DEFAULT_STALE_NEIGHBOR_DAYS: Final = 30
+
+# Channel-entity key prefix and message-suffix used by entity_id helpers
+# in utils.py. Mirror the upstream values so the entity_ids the helpers
+# produce match what the upstream integration registered.
+CHANNEL_PREFIX: Final = "channel_"
+MESSAGES_SUFFIX: Final = "messages"
