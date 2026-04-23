@@ -6882,7 +6882,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
             ${this.narrow||"always_hidden"===this.hass?.dockedSidebar?j`<button class="menu-icon" @click=${this._toggleMenu} aria-label="Toggle sidebar">
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
                 </button>`:j``}
-            <div class="panel-title">MeshCore</div>
+            <div class="panel-title">MeshCore Chat</div>
           </div>
           <div class="header-right">
             ${e&&null!==this._getNodeStatus(e)?j`
