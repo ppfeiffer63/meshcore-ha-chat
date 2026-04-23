@@ -7,7 +7,8 @@
       }
     },
     "abort": {
-      "single_instance_allowed": "MeshCore Chat is already configured."
+      "single_instance_allowed": "MeshCore Chat is already configured.",
+      "meshcore_not_installed": "The MeshCore integration is not installed. Install it from HACS first, then add MeshCore Chat."
     }
   }
 }
