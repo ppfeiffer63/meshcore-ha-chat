@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/brand/readme-banner.png" alt="MeshCore Chat for Home Assistant" width="800"></p>
+
 # MeshCore Chat for Home Assistant
 
 A sidebar chat panel and persistent message store for the [MeshCore](https://meshcore.io) mesh radio network.
