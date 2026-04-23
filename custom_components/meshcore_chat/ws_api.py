@@ -194,6 +194,30 @@ def ws_get_contacts(hass, connection, msg):
 # Returns paginated, filtered contacts with type counts.
 
 
+def _compute_type_counts(contacts: list) -> dict:
+    """Compute per-type counts for a list of contacts.
+
+    Inlined from upstream feature/sidebar-panel coordinator
+    (`_compute_type_counts` static method) — see Phase 4 deploy notes.
+    The companion-supporting `dev/combined` coordinator deliberately omits
+    `get_contacts_paginated` / `get_node_counts`, so the companion duplicates
+    the small amount of logic that operates on the public `get_all_contacts()`
+    payload. TODO(v0.2): refactor into a single `coordinator_facade` module.
+    """
+    counts = {"clients": 0, "repeaters": 0, "room_servers": 0, "sensors": 0}
+    for c in contacts:
+        t = c.get("type", 0)
+        if t in (0, 1):
+            counts["clients"] += 1
+        elif t == 2:
+            counts["repeaters"] += 1
+        elif t == 3:
+            counts["room_servers"] += 1
+        elif t == 4:
+            counts["sensors"] += 1
+    return counts
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "meshcore_chat/get_contacts_paginated",
@@ -212,21 +236,75 @@ def ws_get_contacts(hass, connection, msg):
 )
 @callback
 def ws_get_contacts_paginated(hass, connection, msg):
-    """Return paginated contacts with filtering and type counts."""
+    """Return paginated contacts with filtering and type counts.
+
+    Inlined from upstream feature/sidebar-panel `coordinator.get_contacts_paginated`
+    — companion-supporting `dev/combined` doesn't ship that helper. All filtering
+    and sorting runs against `coordinator.get_all_contacts()`. See `_compute_type_counts`.
+    TODO(v0.2): hoist into `coordinator_facade`.
+    """
     coordinator = _get_coordinator(hass, msg.get("entry_id"))
     if not coordinator:
         connection.send_error(msg["id"], "not_found", "No MeshCore coordinator found")
         return
 
-    result = coordinator.get_contacts_paginated(
-        category=msg["category"],
-        node_type=msg.get("node_type"),
-        search=msg.get("search"),
-        limit=msg["limit"],
-        offset=msg["offset"],
-        sort_by=msg["sort_by"],
+    category = msg["category"]
+    node_type = msg.get("node_type")
+    search = msg.get("search")
+    limit = msg["limit"]
+    offset = msg["offset"]
+    sort_by = msg["sort_by"]
+
+    all_contacts = coordinator.get_all_contacts()
+
+    # Category filter (added vs discovered)
+    if category == "added":
+        filtered = [c for c in all_contacts if c.get("added_to_node")]
+    elif category == "discovered":
+        filtered = [c for c in all_contacts if not c.get("added_to_node")]
+    else:
+        filtered = list(all_contacts)
+
+    # Type counts BEFORE search filter (but after category filter), so the
+    # category badges remain stable as the user types in the search box.
+    type_counts = _compute_type_counts(filtered)
+
+    # Search filter (substring match against adv_name and pubkey_prefix)
+    if search:
+        search_lower = search.lower()
+        filtered = [
+            c for c in filtered
+            if search_lower in (c.get("adv_name") or "").lower()
+            or search_lower in (c.get("pubkey_prefix") or "").lower()
+        ]
+
+    # Type filter — clients are 0 OR 1 (firmware-emitted ambiguity).
+    if node_type is not None:
+        if node_type <= 1:
+            filtered = [c for c in filtered if c.get("type", 0) in (0, 1)]
+        else:
+            filtered = [c for c in filtered if c.get("type") == node_type]
+
+    # Sort BEFORE pagination so the visible page reflects the true top-N.
+    if sort_by == "name":
+        # Strip leading whitespace before lowering — some firmware emits
+        # adv_name with a leading space which would otherwise sort below all
+        # printable chars.
+        filtered.sort(key=lambda c: (c.get("adv_name") or "").strip().lower())
+    elif sort_by == "prefix":
+        filtered.sort(key=lambda c: c.get("pubkey_prefix") or "")
+    else:
+        # "last_heard" default — keyed on `lastmod` (not `last_advert`) so
+        # firmware-emitted bogus year-2081+ values can't pin nodes to top.
+        filtered.sort(key=lambda c: c.get("lastmod") or 0, reverse=True)
+
+    total = len(filtered)
+    page = filtered[offset : offset + limit]
+
+    connection.send_result(
+        msg["id"],
+        {"contacts": page, "total": total, "counts": type_counts},
     )
-    connection.send_result(msg["id"], result)
 
 
 # ─── meshcore/get_node_counts ────────────────────────────────────────
@@ -241,14 +319,29 @@ def ws_get_contacts_paginated(hass, connection, msg):
 )
 @callback
 def ws_get_node_counts(hass, connection, msg):
-    """Return node counts for each primary filter category."""
+    """Return node counts for each primary filter category.
+
+    Inlined from upstream feature/sidebar-panel `coordinator.get_node_counts` —
+    companion-supporting `dev/combined` doesn't ship that helper. Counts are
+    derived from `coordinator.get_all_contacts()`. TODO(v0.2): hoist into
+    `coordinator_facade`.
+    """
     coordinator = _get_coordinator(hass, msg.get("entry_id"))
     if not coordinator:
         connection.send_error(msg["id"], "not_found", "No MeshCore coordinator found")
         return
 
-    counts = coordinator.get_node_counts()
-    connection.send_result(msg["id"], counts)
+    all_contacts = coordinator.get_all_contacts()
+    added = sum(1 for c in all_contacts if c.get("added_to_node"))
+    discovered = sum(1 for c in all_contacts if not c.get("added_to_node"))
+    connection.send_result(
+        msg["id"],
+        {
+            "all": added + discovered,
+            "added": added,
+            "discovered": discovered,
+        },
+    )
 
 
 # ─── meshcore/clear_discovered_contacts ─────────────────────────────
@@ -1000,8 +1093,50 @@ async def ws_remove_neighbor(hass, connection, msg):
 
         resp_text = _format_event_response(cmd_result)
 
-        # Remove neighbor entities and tracking from HA
-        removed = coordinator.remove_single_neighbor(target_prefix, neighbor_pubkey)
+        # Remove neighbor entities and tracking from HA.
+        #
+        # Inlined from upstream feature/sidebar-panel
+        # `coordinator.remove_single_neighbor` — that method was deliberately
+        # removed from upstream main (commit 9211499) and is therefore absent
+        # from the companion-supporting `dev/combined`. The companion still
+        # exposes a remove-neighbor flow via meshcore_chat/remove_neighbor, so
+        # we duplicate the small entity-cleanup + persistence sequence here.
+        # TODO(v0.2): hoist into `coordinator_facade`.
+        removed = 0
+        try:
+            from homeassistant.helpers import entity_registry as er
+            entity_registry = er.async_get(hass)
+            unique_id_prefix = (
+                f"{coordinator.config_entry.entry_id}_repeater_{target_prefix}"
+                f"_neighbor_{neighbor_pubkey[:12]}"
+            )
+            for entity in list(entity_registry.entities.values()):
+                if entity.platform == MESHCORE_DOMAIN and (
+                    entity.unique_id or ""
+                ).startswith(unique_id_prefix):
+                    _LOGGER.info(
+                        "Removing neighbor entity: %s", entity.entity_id
+                    )
+                    entity_registry.async_remove(entity.entity_id)
+                    removed += 1
+
+            # In-memory bookkeeping mirroring the upstream method.
+            repeater_neighbors = coordinator._repeater_neighbors.get(
+                target_prefix, {}
+            )
+            if neighbor_pubkey in repeater_neighbors:
+                del repeater_neighbors[neighbor_pubkey]
+
+            sensor_key = f"{target_prefix}:{neighbor_pubkey}"
+            coordinator._created_neighbor_sensors.discard(sensor_key)
+
+            # Persist updated data (fire-and-forget, mirrors upstream).
+            hass.async_create_task(coordinator._save_neighbor_data())
+        except Exception as cleanup_ex:
+            _LOGGER.warning(
+                "Inlined remove_single_neighbor cleanup failed for %s/%s: %s",
+                target_prefix[:6], neighbor_pubkey[:6], cleanup_ex,
+            )
 
         connection.send_result(
             msg["id"],
