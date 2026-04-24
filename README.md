@@ -114,15 +114,17 @@ Copy `custom_components/meshcore_chat/` into your HA `config/custom_components/`
 
 ## Development
 
-The frontend is TypeScript built via Rollup. To rebuild after editing source:
+The frontend source lives at `frontend/` (repo root). The build environment doesn't ship to HACS users — only the compiled bundle at `custom_components/meshcore_chat/meshcore-chat-panel.js` does.
+
+To rebuild after editing source:
 
 ```
-cd custom_components/meshcore_chat/frontend
+cd frontend
 npm install
 npm run build
 ```
 
-The committed `custom_components/meshcore_chat/ha_frontend/panel.js` is what HACS ships — rebuild and commit when source changes.
+Rollup writes the bundle directly to `../custom_components/meshcore_chat/meshcore-chat-panel.js`. Commit the rebuilt bundle when source changes.
 
 ## License
 

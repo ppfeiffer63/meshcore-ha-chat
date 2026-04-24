@@ -23,10 +23,12 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
-# HTTP path under which the rollup `dist/` directory is exposed. Files
-# referenced from the panel's module_url are resolved against this prefix.
-PANEL_URL = "/meshcore_chat_panel"
-PANEL_FRONTEND_PATH = str(Path(__file__).parent / "frontend" / "dist")
+# HTTP URL the bundle is served at; module_url below points at this path.
+PANEL_URL = "/meshcore_chat_panel/meshcore-chat-panel.js"
+# Filesystem path to the bundle. Lives flat at the integration root since
+# the rollup output is a single file (no chunks, no source maps, no other
+# assets); a wrapper directory would add nothing.
+PANEL_FRONTEND_PATH = str(Path(__file__).parent / "meshcore-chat-panel.js")
 
 PANEL_ICON = "mdi:radio-handheld"
 PANEL_TITLE = "MeshCore Chat"
@@ -49,7 +51,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
         config={
             "_panel_custom": {
                 "name": "meshcore-chat-panel",
-                "module_url": f"{PANEL_URL}/meshcore-chat-panel.js",
+                "module_url": PANEL_URL,
             }
         },
         require_admin=False,

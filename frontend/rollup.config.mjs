@@ -7,7 +7,9 @@ const dev = process.env.ROLLUP_WATCH === 'true';
 export default {
   input: 'src/meshcore-chat-panel.ts',
   output: {
-    file: 'dist/meshcore-chat-panel.js',
+    // Bundle ships flat at the integration root — see panel.py for the
+    // matching StaticPathConfig that serves this file.
+    file: '../custom_components/meshcore_chat/meshcore-chat-panel.js',
     format: 'es',
     sourcemap: dev,
   },
