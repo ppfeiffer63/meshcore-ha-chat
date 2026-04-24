@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/brand/readme-banner.png" alt="MeshCore Chat for Home Assistant" width="800"></p>
+<p align="center"><img src="assets/banner.png" alt="MeshCore Chat for Home Assistant" width="800"></p>
 
 # MeshCore Chat for Home Assistant
 
@@ -24,16 +24,16 @@ Works as a **companion** to the [core meshcore integration](https://github.com/m
 
 <table>
 <tr>
-<td width="50%"><a href="docs/screenshots/chat-tab.jpg"><img src="docs/screenshots/chat-tab.jpg" alt="Chat tab"></a></td>
-<td width="50%"><a href="docs/screenshots/devices-tab.jpg"><img src="docs/screenshots/devices-tab.jpg" alt="Devices tab"></a></td>
+<td width="50%"><a href="assets/screenshots/chat-tab.jpg"><img src="assets/screenshots/chat-tab.jpg" alt="Chat tab"></a></td>
+<td width="50%"><a href="assets/screenshots/devices-tab.jpg"><img src="assets/screenshots/devices-tab.jpg" alt="Devices tab"></a></td>
 </tr>
 <tr>
 <td><b>Chat</b> — channels and DMs in the left rail with All / Unread / DMs / Channels filters; messages rendered with sender, age, and delivery status (Repeated / Sent / Waiting).</td>
 <td><b>Devices</b> — per-device sensor tiles (SNR, RSSI, airtime, battery, message counts) with a neighbor table and quick-action buttons (Flood Advert, Sync Clock, Req Telemetry, Req Status).</td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/nodes-tab.jpg"><img src="docs/screenshots/nodes-tab.jpg" alt="Nodes tab"></a></td>
-<td><a href="docs/screenshots/settings-tab.jpg"><img src="docs/screenshots/settings-tab.jpg" alt="Settings tab"></a></td>
+<td><a href="assets/screenshots/nodes-tab.jpg"><img src="assets/screenshots/nodes-tab.jpg" alt="Nodes tab"></a></td>
+<td><a href="assets/screenshots/settings-tab.jpg"><img src="assets/screenshots/settings-tab.jpg" alt="Settings tab"></a></td>
 </tr>
 <tr>
 <td><b>Nodes</b> — full network discovery view (All / Added / Discovered, then Clients / Repeaters), with search, last-heard sort, and stale-record cleanup.</td>
@@ -45,8 +45,8 @@ Works as a **companion** to the [core meshcore integration](https://github.com/m
 
 <table>
 <tr>
-<td width="50%"><a href="docs/screenshots/chat-popup.jpg"><img src="docs/screenshots/chat-popup.jpg" alt="Message popup with route metadata"></a></td>
-<td width="50%"><a href="docs/screenshots/manage-contacts-channels.jpg"><img src="docs/screenshots/manage-contacts-channels.jpg" alt="Manage contacts and channels"></a></td>
+<td width="50%"><a href="assets/screenshots/chat-popup.jpg"><img src="assets/screenshots/chat-popup.jpg" alt="Message popup with route metadata"></a></td>
+<td width="50%"><a href="assets/screenshots/manage-contacts-channels.jpg"><img src="assets/screenshots/manage-contacts-channels.jpg" alt="Manage contacts and channels"></a></td>
 </tr>
 <tr>
 <td><b>Message popup</b> — click or tap any message for Copy / Reply, plus the route metadata: hop sequence, SNR, RSSI, and exact receive timestamp.</td>
@@ -58,8 +58,8 @@ Works as a **companion** to the [core meshcore integration](https://github.com/m
 
 <table>
 <tr>
-<td width="50%"><a href="docs/screenshots/node-popup.jpg"><img src="docs/screenshots/node-popup.jpg" alt="Node detail popup"></a></td>
-<td width="50%"><a href="docs/screenshots/trace-dialog.jpg"><img src="docs/screenshots/trace-dialog.jpg" alt="Path trace dialog"></a></td>
+<td width="50%"><a href="assets/screenshots/node-popup.jpg"><img src="assets/screenshots/node-popup.jpg" alt="Node detail popup"></a></td>
+<td width="50%"><a href="assets/screenshots/trace-dialog.jpg"><img src="assets/screenshots/trace-dialog.jpg" alt="Path trace dialog"></a></td>
 </tr>
 <tr>
 <td><b>Node details</b> — click any node tile in the Nodes tab to open quick actions (Trace, Remove Contact), public-key prefix, type, last advert, and location.</td>
@@ -71,16 +71,16 @@ Works as a **companion** to the [core meshcore integration](https://github.com/m
 
 <table>
 <tr>
-<td width="50%"><a href="docs/screenshots/device-settings.jpg"><img src="docs/screenshots/device-settings.jpg" alt="Device settings menu"></a></td>
-<td width="50%"><a href="docs/screenshots/device-command.jpg"><img src="docs/screenshots/device-command.jpg" alt="Issue command picker"></a></td>
+<td width="50%"><a href="assets/screenshots/device-settings.jpg"><img src="assets/screenshots/device-settings.jpg" alt="Device settings menu"></a></td>
+<td width="50%"><a href="assets/screenshots/device-command.jpg"><img src="assets/screenshots/device-command.jpg" alt="Issue command picker"></a></td>
 </tr>
 <tr>
 <td><b>Device settings menu</b> — per-device gear menu: View Hidden Sensors, Issue Command, Reboot, Start OTA Update.</td>
 <td><b>Issue Command</b> — full command catalog grouped by category (Device Management, Device Info, etc.) — drives the underlying meshcore service from the panel.</td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/companion-settings.jpg"><img src="docs/screenshots/companion-settings.jpg" alt="Companion settings menu"></a></td>
-<td><a href="docs/screenshots/tile-more-info.jpg"><img src="docs/screenshots/tile-more-info.jpg" alt="Sensor tile more-info"></a></td>
+<td><a href="assets/screenshots/companion-settings.jpg"><img src="assets/screenshots/companion-settings.jpg" alt="Companion settings menu"></a></td>
+<td><a href="assets/screenshots/tile-more-info.jpg"><img src="assets/screenshots/tile-more-info.jpg" alt="Sensor tile more-info"></a></td>
 </tr>
 <tr>
 <td><b>Companion settings menu</b> — same gear menu pattern for the local companion device, with Key Management as an additional option.</td>
