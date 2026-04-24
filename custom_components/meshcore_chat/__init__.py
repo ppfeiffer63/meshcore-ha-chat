@@ -249,6 +249,25 @@ def _make_message_handler(hass: HomeAssistant, entry_id: str):
         if record.get("rx_log_data"):
             enrich_rx_log_entries(record["rx_log_data"])
 
+        # Route-popup synth for DMs. Channel messages get per-repeater rx_log_data
+        # arrays via the upstream RX_LOG correlation pass; DMs don't — they
+        # carry hop_count + snr at the top level of the event payload (added
+        # by upstream PR #215 / feature/dm-signal-metadata). The frontend's
+        # message-bubble route popup keys off rx_log_data, so synthesize a
+        # single-entry array from the top-level fields when only those are
+        # present. The frontend then renders the popup as if it were a 1-entry
+        # rx_log; no frontend changes needed.
+        if record.get("hop_count") is not None and not record.get("rx_log_data"):
+            synth: dict[str, Any] = {"hop_count": record["hop_count"], "synthesized": True}
+            # Skip None values — the upstream event payload sometimes carries
+            # snr/rssi as None rather than omitting them, and the frontend
+            # renders "RSSI: null" if we pass them through unconditionally.
+            if record.get("snr") is not None:
+                synth["snr"] = record["snr"]
+            if record.get("rssi") is not None:
+                synth["rssi"] = record["rssi"]
+            record["rx_log_data"] = [synth]
+
         # Default delivery_status. The upstream EVENT_MESHCORE_MESSAGE for
         # outgoing fires AFTER its 4-second progressive RX_LOG collection
         # window (handle_outgoing_message in upstream logbook.py) — so by

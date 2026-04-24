@@ -57,7 +57,7 @@ def _safe_id(entity_id: str) -> str:
 def _backfill_messages(messages: list[dict]) -> bool:
     """One-time, in-place migration of stored records.
 
-    Two backfills:
+    Three backfills:
 
     1. Enrich rx_log entries with ``path_nodes``/``hop_count`` derived
        from ``path``/``path_len``. Companion-supporting dev/combined
@@ -70,6 +70,12 @@ def _backfill_messages(messages: list[dict]) -> bool:
        outgoing records all defaulted to "pending" and never advanced
        because progressive delivery_update events also defaulted to
        "pending". This unsticks them on next load.
+
+    3. Synth a single-entry ``rx_log_data`` for DMs that carry top-level
+       ``hop_count`` but no ``rx_log_data``. The frontend route popup keys
+       off ``rx_log_data``; without this, DMs (which never get RX_LOG
+       correlation) wouldn't show route metadata. Mirrors the live-message
+       synth in ``__init__.py`` so existing stored DMs benefit too.
 
     Returns True if anything changed — caller should mark the
     conversation dirty so the migration persists on next save.
@@ -87,6 +93,17 @@ def _backfill_messages(messages: list[dict]) -> bool:
             and (m.get("repeater_count") or rx)
         ):
             m["delivery_status"] = "sent"
+            changed = True
+        # Synth rx_log_data for DMs with top-level hop_count and no rx_log.
+        # Skip None values for snr/rssi — frontend would render "RSSI: null"
+        # otherwise.
+        if m.get("hop_count") is not None and not m.get("rx_log_data"):
+            synth: dict = {"hop_count": m["hop_count"], "synthesized": True}
+            if m.get("snr") is not None:
+                synth["snr"] = m["snr"]
+            if m.get("rssi") is not None:
+                synth["rssi"] = m["rssi"]
+            m["rx_log_data"] = [synth]
             changed = True
     return changed
 
