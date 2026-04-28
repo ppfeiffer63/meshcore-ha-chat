@@ -486,10 +486,9 @@ export class NodeSummary extends LitElement {
     const trafficRows = this._buildTrafficRows(consumed);
     if (trafficRows.length) groups['Traffic · totals'].push(...trafficRows);
 
-    const radioCompositeRows = this._buildRadioCompositeRows(consumed);
-    if (radioCompositeRows.length) {
-      groups['Radio · live'].push(...radioCompositeRows);
-    }
+    // No radio composite rows: the windowed TX/RX/Idle composition is
+    // already shown in the Radio Activity hero tile. Individual airtime
+    // entities are filtered upstream in _isHeroDuplicate.
 
     for (const e of this.entities) {
       if (consumed.has(e.entity_id)) continue;
@@ -520,6 +519,12 @@ export class NodeSummary extends LitElement {
     if (info.metricKey === 'snr' || info.metricKey === 'rssi') return true;
     // Uptime — promoted to the device header status badge ("Online · 12d 19h").
     if (info.metricKey === 'uptime_hours') return true;
+    // Airtime variants — Radio Activity hero tile shows the windowed
+    // TX/RX/Idle composition, which is the value of these entities.
+    // Hide both the windowed util sensors and the raw cumulative ones.
+    if (info.metricKey === 'tx_airtime_util'
+        || info.metricKey === 'rx_airtime_util') return true;
+    if (info.label === 'Airtime' || info.label === 'RX Airtime') return true;
     return false;
   }
 
@@ -615,153 +620,6 @@ export class NodeSummary extends LitElement {
       return evaluateSensor(key, hours);
     }
     return evaluateSensor(key, raw);
-  }
-
-  // ─── Radio composite rows ─────────────────────────────────────────────
-
-  /** Build the two stacked-bar rows in Radio · live:
-   *  - Airtime (cumulative): TX / RX as % of total uptime.
-   *  - Airtime utilization (windowed): the latest reporting interval's
-   *    TX / RX util sum to ≤ 100% with idle filling the rest.
-   *  Both consume their component entities so the table doesn't show
-   *  the four individual airtime rows separately. */
-  private _buildRadioCompositeRows(consumed: Set<string>): TemplateResult[] {
-    const rows: TemplateResult[] = [];
-
-    // ─── Cumulative airtime as % of uptime ─────────────────────────────
-    const airtimeRaw = this._findEntityByLabel('Airtime');
-    const rxAirtimeRaw = this._findEntityByLabel('RX Airtime');
-    const uptime = this._findByMetric('uptime_hours');
-
-    if ((airtimeRaw || rxAirtimeRaw) && uptime) {
-      const txSec = airtimeRaw
-        ? this._timeValueInSeconds(airtimeRaw.entity_id)
-        : 0;
-      const rxSec = rxAirtimeRaw
-        ? this._timeValueInSeconds(rxAirtimeRaw.entity_id)
-        : 0;
-      const upSec = this._timeValueInSeconds(uptime.entity_id);
-
-      if (Number.isFinite(upSec) && upSec > 0) {
-        const txPct = Math.max(0, (txSec / upSec) * 100);
-        const rxPct = Math.max(0, (rxSec / upSec) * 100);
-        const idlePct = Math.max(0, 100 - txPct - rxPct);
-
-        const segs: StackedBarSegment[] = [
-          { value: txPct,   label: `TX ${txPct.toFixed(2)}%`,   kind: 'tx' },
-          { value: rxPct,   label: `RX ${rxPct.toFixed(2)}%`,   kind: 'rx' },
-          { value: idlePct, label: `Idle ${idlePct.toFixed(1)}%`, kind: 'idle' },
-        ];
-
-        // Use the worse of the two band classifications for the dot.
-        const band = this._worseBand(
-          evaluateSensor('tx_airtime_util', txPct).band,
-          evaluateSensor('rx_airtime_util', rxPct).band,
-        );
-
-        rows.push(html`
-          <tr class="data-row stacked-row"
-              @click=${() => airtimeRaw && this._fireMoreInfo(airtimeRaw.entity_id)}>
-            <td class="col-status">
-              <span class="status-dot ${band}"></span>
-            </td>
-            <td class="col-label">
-              Airtime
-              ${this._renderInfoTip({
-                band,
-                fillPct: 0,
-                tooltip:
-                  'Cumulative TX and RX airtime as a percentage of total ' +
-                  'uptime. Bar represents 100% of uptime; segments are TX, ' +
-                  'RX, and idle.',
-              })}
-            </td>
-            <td class="col-value">${(txPct + rxPct).toFixed(2)}%</td>
-            <td class="col-bar">
-              <meshcore-stacked-bar
-                .segments=${segs}
-                .total=${100}
-                .legend=${'inline'}>
-              </meshcore-stacked-bar>
-            </td>
-          </tr>
-        `);
-
-        if (airtimeRaw) consumed.add(airtimeRaw.entity_id);
-        if (rxAirtimeRaw) consumed.add(rxAirtimeRaw.entity_id);
-      }
-    }
-
-    // ─── Windowed airtime utilization (TX util + RX util + Idle = 100) ──
-    const txUtil = this._findByMetric('tx_airtime_util');
-    const rxUtil = this._findByMetric('rx_airtime_util');
-    if (txUtil || rxUtil) {
-      const txN = txUtil ? this._readNumber(txUtil.entity_id) : NaN;
-      const rxN = rxUtil ? this._readNumber(rxUtil.entity_id) : NaN;
-      const txF = Number.isFinite(txN) ? Math.max(0, txN) : 0;
-      const rxF = Number.isFinite(rxN) ? Math.max(0, rxN) : 0;
-      const idleF = Math.max(0, 100 - txF - rxF);
-
-      const segs: StackedBarSegment[] = [
-        { value: txF,   label: `TX ${txF.toFixed(1)}%`,   kind: 'tx' },
-        { value: rxF,   label: `RX ${rxF.toFixed(1)}%`,   kind: 'rx' },
-        { value: idleF, label: `Idle ${idleF.toFixed(1)}%`, kind: 'idle' },
-      ];
-
-      const band = this._worseBand(
-        evaluateSensor('tx_airtime_util', txF).band,
-        evaluateSensor('rx_airtime_util', rxF).band,
-      );
-
-      rows.push(html`
-        <tr class="data-row stacked-row"
-            @click=${() => txUtil && this._fireMoreInfo(txUtil.entity_id)}>
-          <td class="col-status">
-            <span class="status-dot ${band}"></span>
-          </td>
-          <td class="col-label">
-            Airtime utilization
-            ${this._renderInfoTip({
-              band,
-              fillPct: 0,
-              tooltip:
-                'Windowed TX and RX airtime utilization over the last ' +
-                'reporting interval. Bar segments sum to ≤ 100%; idle ' +
-                'fills the rest.',
-            })}
-          </td>
-          <td class="col-value">${(txF + rxF).toFixed(1)}%</td>
-          <td class="col-bar">
-            <meshcore-stacked-bar
-              .segments=${segs}
-              .total=${100}
-              .legend=${'inline'}>
-            </meshcore-stacked-bar>
-          </td>
-        </tr>
-      `);
-
-      if (txUtil) consumed.add(txUtil.entity_id);
-      if (rxUtil) consumed.add(rxUtil.entity_id);
-    }
-
-    return rows;
-  }
-
-  /** Read a sensor's state value and convert via its unit_of_measurement
-   *  attribute to seconds. Used for the cumulative airtime composite. */
-  private _timeValueInSeconds(entityId: string): number {
-    const raw = this._readNumber(entityId);
-    if (!Number.isFinite(raw)) return NaN;
-    const unit = (this.hass?.states[entityId]?.attributes
-                  ?.unit_of_measurement as string) ?? 's';
-    switch (unit) {
-      case 'd':   return raw * 86400;
-      case 'h':   return raw * 3600;
-      case 'min': return raw * 60;
-      case 's':
-      default:    return raw;
-    }
   }
 
   /** Read a *_rate sensor's state directly from hass.states (rate sensors
