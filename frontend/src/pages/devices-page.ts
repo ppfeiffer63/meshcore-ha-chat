@@ -125,12 +125,21 @@ export class DevicesPage extends LitElement {
         align-items: center;
         justify-content: space-between;
         margin-bottom: 16px;
+        gap: 8px;
+        flex-wrap: wrap;
       }
 
       .section-title {
         display: flex;
         align-items: center;
         gap: 8px;
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .section-title > div:last-child {
+        min-width: 0;
+        flex: 1 1 auto;
       }
 
       .section-icon {
@@ -162,6 +171,9 @@ export class DevicesPage extends LitElement {
         font-size: 16px;
         font-weight: 600;
         color: var(--primary-text-color);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .device-meta {
@@ -183,6 +195,8 @@ export class DevicesPage extends LitElement {
         font-size: 11px;
         font-weight: 600;
         flex-shrink: 0;
+        white-space: nowrap;
+        max-width: 100%;
       }
 
       .status-badge.online {
