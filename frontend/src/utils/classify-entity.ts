@@ -49,7 +49,17 @@ export interface MeshcoreRegistryResult {
  */
 export function classifyEntity(entity: any): EntityInfo | null {
   const eid: string = entity.entity_id;
-  const dc: string | null = entity.original_device_class ?? null;
+  // Read device_class from any of the three places HA might surface it:
+  //   - entity.original_device_class (registry; integration-declared, immutable)
+  //   - entity.device_class (registry; user override, often null)
+  //   - entity._stateDeviceClass (injected by loadMeshcoreEntityRegistry from
+  //     hass.states[eid].attributes.device_class — the only one that is
+  //     consistently populated on this HA install at the time of writing).
+  // Reading from all three keeps the classifier correct across HA versions.
+  const dc: string | null = entity.original_device_class
+                         ?? entity.device_class
+                         ?? entity._stateDeviceClass
+                         ?? null;
 
   // --- Step 1: exclude peer-contact binary_sensors ---
   // All meshcore binary_sensors today are contact-discovery entities with
@@ -61,48 +71,81 @@ export function classifyEntity(entity: any): EntityInfo | null {
   if (eid.startsWith('binary_sensor.meshcore_')) return null;
 
   // --- Step 2: meshcore-specific status/control exclusions (entity_id substrings) ---
+  // *_rate sensors are derived counters (per-minute deltas of the totals).
+  // The new node-summary card uses TOTALS via composite stacked bars, so
+  // the rate sensors would be redundant noise. Excluded here rather than
+  // hidden in the card so they also disappear from the hidden-sensors
+  // modal preview.
+  if (eid.endsWith('_rate')) return null;
   if (eid.includes('node_status') || eid.includes('companion_prefix')
       || eid.includes('request_rate') || eid.includes('delivery')
       || eid.includes('path_') || eid.includes('neighbor_')) return null;
 
-  // --- Step 3: classify by HA device_class ---
-  if (dc === 'battery') {
+  // --- Step 3: classify by HA device_class, with entity_id substring as a
+  //     defensive parallel match. Some HA installs do not surface
+  //     original_device_class on the entity_registry/list response; the
+  //     entity_id pattern is the project-specific fallback. ---
+  if (dc === 'battery' || eid.includes('battery_percentage')) {
     return { entity_id: eid, label: 'Battery', icon: 'battery',
              colorScheme: 'battery', sortOrder: 1,
              metricKey: 'battery_pct' };
   }
-  if (dc === 'voltage') {
+  if (dc === 'voltage' || eid.includes('battery_voltage')
+      || eid.includes('_voltage') || eid.includes('cv_voltage')) {
     // Q3: voltage is informational only. No metricKey — chemistry varies
     // per board and the integration doesn't expose chemistry per node.
     return { entity_id: eid, label: 'Voltage', icon: 'power',
              colorScheme: 'neutral', sortOrder: 2 };
   }
-  if (dc === 'duration') {
-    // Uptime is reported in seconds; node-summary divides by 3600 before
-    // calling evaluateSensor('uptime_hours', ...).
+  if (dc === 'duration' || eid.includes('uptime')) {
+    // Uptime: state value's unit varies by integration (HA defaults vary
+    // between seconds/hours/days). node-summary._evaluateForRow reads the
+    // unit_of_measurement state attribute to convert to hours before calling
+    // evaluateSensor.
     return { entity_id: eid, label: 'Uptime', icon: 'clock',
              colorScheme: 'neutral', sortOrder: 3,
              metricKey: 'uptime_hours' };
   }
-  if (dc === 'signal_strength') {
+  if (dc === 'signal_strength' || eid.includes('tx_power')) {
     // Currently only TX Power uses signal_strength in meshcore. TX Power
     // is informational (regulatory ceilings vary per region) — no metricKey.
     return { entity_id: eid, label: 'TX Power', icon: 'power',
              colorScheme: 'neutral', sortOrder: 6 };
   }
-  if (dc === 'temperature') {
+  if (dc === 'temperature' || eid.includes('_temperature')) {
     return { entity_id: eid, label: 'Temperature', icon: 'thermometer',
              colorScheme: 'neutral', sortOrder: 7 };
   }
-  if (dc === 'power_factor') {
-    // Airtime Utilization / RX Airtime Utilization (both use power_factor).
-    const isRx = eid.includes('rx_');
-    return { entity_id: eid, label: isRx ? 'RX Airtime Util' : 'Airtime Util',
-             icon: 'chart', colorScheme: 'neutral', sortOrder: 10,
-             metricKey: isRx ? 'rx_airtime_util' : 'tx_airtime_util' };
+
+  // --- Step 4: entity_id substring fallback (categories without a device_class
+  //     OR cases where device_class lookup failed in Step 3). Order matters:
+  //     more specific substrings before less specific. ---
+
+  // Airtime utilization variants come BEFORE raw airtime; the
+  // _utilization sensors are the threshold-banded metrics. Differentiate
+  // RX vs TX explicitly so the table shows distinct rows instead of four
+  // "Airtime" lines.
+  if (eid.includes('rx_airtime_utilization')) {
+    return { entity_id: eid, label: 'RX Airtime Util', icon: 'chart',
+             colorScheme: 'neutral', sortOrder: 10,
+             metricKey: 'rx_airtime_util' };
+  }
+  if (eid.includes('airtime_utilization')) {
+    return { entity_id: eid, label: 'Airtime Util', icon: 'chart',
+             colorScheme: 'neutral', sortOrder: 10,
+             metricKey: 'tx_airtime_util' };
+  }
+  if (eid.includes('rx_airtime')) {
+    // Raw RX airtime (total seconds receiving). Informational — no band.
+    return { entity_id: eid, label: 'RX Airtime', icon: 'chart',
+             colorScheme: 'neutral', sortOrder: 9 };
+  }
+  if (eid.includes('airtime')) {
+    // Raw TX airtime (total seconds transmitting). Informational — no band.
+    return { entity_id: eid, label: 'Airtime', icon: 'chart',
+             colorScheme: 'neutral', sortOrder: 9 };
   }
 
-  // --- Step 4: entity_id substring fallback (categories without a device_class) ---
   if (eid.includes('snr') && !eid.includes('neighbor')) {
     return { entity_id: eid, label: 'SNR', icon: 'signal',
              colorScheme: 'signal', sortOrder: 4,
@@ -113,16 +156,20 @@ export function classifyEntity(entity: any): EntityInfo | null {
              colorScheme: 'signal', sortOrder: 5,
              metricKey: 'rssi' };
   }
+  if (eid.includes('noise_floor')) {
+    return { entity_id: eid, label: 'Noise Floor', icon: 'signal',
+             colorScheme: 'signal', sortOrder: 11,
+             metricKey: 'noise_floor' };
+  }
+  if (eid.includes('tx_queue_len')) {
+    // Informational — no published queue-length threshold; a non-zero
+    // value is observable but doesn't always indicate trouble.
+    return { entity_id: eid, label: 'TX Queue Length', icon: 'counter',
+             colorScheme: 'neutral', sortOrder: 12 };
+  }
   if (eid.includes('contact_count')) {
     return { entity_id: eid, label: 'Contacts', icon: 'counter',
              colorScheme: 'neutral', sortOrder: 8 };
-  }
-  if (eid.includes('airtime') || eid.includes('air_util')) {
-    // Raw airtime without power_factor device_class. Utilization variants
-    // were already caught in Step 3. Raw airtime (total seconds transmitting)
-    // is informational — no banded threshold maps to seconds.
-    return { entity_id: eid, label: 'Airtime', icon: 'chart',
-             colorScheme: 'neutral', sortOrder: 9 };
   }
   if (eid.includes('channel_util')) {
     return { entity_id: eid, label: 'Channel Util', icon: 'chart',
@@ -169,7 +216,13 @@ export async function loadMeshcoreEntityRegistry(hass: any): Promise<MeshcoreReg
     if (!entity.entity_id.startsWith('sensor.meshcore_')
         && !entity.entity_id.startsWith('binary_sensor.meshcore_')) continue;
 
-    const info = classifyEntity(entity);
+    // Inject the live state's device_class as a fallback for classifyEntity.
+    // The registry/list response on this HA install does not surface
+    // original_device_class, but the running state's attributes do.
+    const stateDc = hass.states?.[entity.entity_id]?.attributes?.device_class;
+    const enriched = stateDc ? { ...entity, _stateDeviceClass: stateDc } : entity;
+
+    const info = classifyEntity(enriched);
     if (!info) continue;
     if (!deviceEntities[entity.device_id]) deviceEntities[entity.device_id] = [];
     deviceEntities[entity.device_id].push(info);

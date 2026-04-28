@@ -526,7 +526,7 @@ export class NodeSummary extends LitElement {
     const value = this._readNumber(info.entity_id);
     const stateObj = this.hass?.states[info.entity_id];
     const unit = (stateObj?.attributes?.unit_of_measurement as string) ?? '';
-    const ev = info.metricKey ? this._evaluateForRow(info.metricKey, value) : null;
+    const ev = info.metricKey ? this._evaluateForRow(info.metricKey, value, info) : null;
     const band = ev?.band ?? 'info';
 
     const formattedValue = this._formatRowValue(info, value, stateObj?.state);
@@ -561,10 +561,22 @@ export class NodeSummary extends LitElement {
   }
 
   /** Apply metric-specific unit conversion for evaluateSensor. */
-  private _evaluateForRow(key: MetricKey, raw: number): SensorEval {
+  private _evaluateForRow(key: MetricKey, raw: number, info: EntityInfo): SensorEval {
     if (key === 'uptime_hours') {
-      // HA reports uptime in seconds via duration device_class.
-      return evaluateSensor(key, raw / 3600);
+      // The integration's uptime sensor unit varies — the home install
+      // reports days (`d`) per the duration device_class default, but
+      // some flavours report seconds. Convert based on the live unit.
+      const unit = (this.hass?.states[info.entity_id]?.attributes
+                    ?.unit_of_measurement as string) ?? '';
+      let hours = raw;
+      switch (unit) {
+        case 'd':   hours = raw * 24; break;
+        case 'h':   hours = raw; break;
+        case 'min': hours = raw / 60; break;
+        case 's':
+        default:    hours = raw / 3600; break;
+      }
+      return evaluateSensor(key, hours);
     }
     return evaluateSensor(key, raw);
   }
