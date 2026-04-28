@@ -674,6 +674,7 @@ export class MeshCorePanel extends LitElement {
       this._config = {
         node_name: device.name,
         node_prefix: device.pubkey_prefix?.substring(0, 6) || '',
+        entry_id: device.entry_id,
         ...MESHCORE_PRESET,
         ...DEFAULT_PANEL_CONFIG,
       };
@@ -708,6 +709,7 @@ export class MeshCorePanel extends LitElement {
           ...this._config,
           node_name: device.name,
           node_prefix: device.pubkey_prefix?.substring(0, 6) || '',
+          entry_id: device.entry_id,
         };
       }
     } catch (err) {
