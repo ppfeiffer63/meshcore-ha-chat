@@ -510,9 +510,12 @@ export class NodeSummary extends LitElement {
   private _isHeroDuplicate(info: EntityInfo): boolean {
     // Battery percentage — primary value in Battery hero tile.
     if (info.metricKey === 'battery_pct') return true;
-    // Battery voltage — secondary value alongside battery % in hero.
-    // Other voltage channels (Ch1 Voltage etc.) stay in Status.
-    if (info.entity_id.includes('battery_voltage')) return true;
+    // Voltage entities — battery voltage shows alongside battery % in
+    // the hero. Other voltage channels (Ch1 Voltage etc.) are also
+    // hidden because the user doesn't want them next to the battery
+    // voltage already on display. If a future user wants per-channel
+    // voltage visibility back, this is the line to flip.
+    if (info.sortOrder === 2) return true;
     // SNR / RSSI — shown in Last message strength hero tile.
     if (info.metricKey === 'snr' || info.metricKey === 'rssi') return true;
     // Uptime — promoted to the device header status badge ("Online · 12d 19h").
