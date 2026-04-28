@@ -72,11 +72,13 @@ export function classifyEntity(entity: any): EntityInfo | null {
 
   // --- Step 2: meshcore-specific status/control exclusions (entity_id substrings) ---
   // *_rate sensors are derived counters (per-minute deltas of the totals).
-  // The new node-summary card uses TOTALS via composite stacked bars, so
-  // the rate sensors would be redundant noise. Excluded here rather than
-  // hidden in the card so they also disappear from the hidden-sensors
-  // modal preview.
-  if (eid.endsWith('_rate')) return null;
+  // The new node-summary card uses TOTALS via composite stacked bars and
+  // surfaces the cumulative msg/min rate as an annotation, so the rate
+  // sensors would be redundant noise. The entity_id pattern is
+  // `..._<sensor>_rate_<device-name-suffix>` (the device-name suffix is
+  // appended by upstream's entity registration), so endsWith('_rate')
+  // misses them — match the `_rate_` infix instead.
+  if (eid.includes('_rate_')) return null;
   if (eid.includes('node_status') || eid.includes('companion_prefix')
       || eid.includes('request_rate') || eid.includes('delivery')
       || eid.includes('path_') || eid.includes('neighbor_')) return null;
@@ -131,7 +133,7 @@ export function classifyEntity(entity: any): EntityInfo | null {
              metricKey: 'rx_airtime_util' };
   }
   if (eid.includes('airtime_utilization')) {
-    return { entity_id: eid, label: 'Airtime Util', icon: 'chart',
+    return { entity_id: eid, label: 'TX Airtime Util', icon: 'chart',
              colorScheme: 'neutral', sortOrder: 10,
              metricKey: 'tx_airtime_util' };
   }

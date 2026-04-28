@@ -33,7 +33,6 @@ export interface CompanionDeviceDescriptor {
 export type NodeSummaryDevice = ManagedDevice | CompanionDeviceDescriptor;
 
 type GroupName =
-  | 'Power'
   | 'Radio · live'
   | 'Radio · configuration'
   | 'Traffic · totals'
@@ -234,6 +233,11 @@ export class NodeSummary extends LitElement {
     .dup-annotation .num {
       font-weight: 500;
       color: var(--warn, #ff9800);
+    }
+    .rate-annotation {
+      font-size: 11px;
+      color: var(--secondary-text-color);
+      margin-top: 2px;
     }
   `;
 
@@ -465,22 +469,31 @@ export class NodeSummary extends LitElement {
 
   private _buildGroups(): { name: GroupName; rows: TemplateResult[] }[] {
     const groups: Record<GroupName, TemplateResult[]> = {
-      'Power': [],
       'Radio · live': [],
       'Radio · configuration': [],
       'Traffic · totals': [],
       'Status': [],
       'Identity': [],
     };
+    // Power group is intentionally absent — battery and voltage are
+    // shown in the Battery hero tile (% as primary, voltage as secondary
+    // alongside). Duplicating them as table rows just makes the card
+    // taller without adding information.
 
-    // Track entity_ids consumed by composite Traffic rows so we don't
-    // double-render them as individual rows below.
     const consumed = new Set<string>();
+
+    // Build composite rows first; they consume their component entities.
     const trafficRows = this._buildTrafficRows(consumed);
     if (trafficRows.length) groups['Traffic · totals'].push(...trafficRows);
 
+    const radioCompositeRows = this._buildRadioCompositeRows(consumed);
+    if (radioCompositeRows.length) {
+      groups['Radio · live'].push(...radioCompositeRows);
+    }
+
     for (const e of this.entities) {
       if (consumed.has(e.entity_id)) continue;
+      if (this._isHeroDuplicate(e)) continue;
       const group = this._groupOf(e);
       groups[group].push(this._renderRow(e));
     }
@@ -490,13 +503,33 @@ export class NodeSummary extends LitElement {
       .map(([name, rows]) => ({ name, rows }));
   }
 
+  /** Return true for entities whose value is already shown in the hero
+   *  row or in the device header status badge. Filtering here keeps the
+   *  table tight without losing the entity from hidden-sensors-modal
+   *  visibility (it's still in `this.entities`, just not rendered). */
+  private _isHeroDuplicate(info: EntityInfo): boolean {
+    // Battery percentage — primary value in Battery hero tile.
+    if (info.metricKey === 'battery_pct') return true;
+    // Battery voltage — secondary value alongside battery % in hero.
+    // Other voltage channels (Ch1 Voltage etc.) stay in Status.
+    if (info.entity_id.includes('battery_voltage')) return true;
+    // SNR / RSSI — shown in Last message strength hero tile.
+    if (info.metricKey === 'snr' || info.metricKey === 'rssi') return true;
+    // Uptime — promoted to the device header status badge ("Online · 12d 19h").
+    if (info.metricKey === 'uptime_hours') return true;
+    return false;
+  }
+
   private _groupOf(info: EntityInfo): GroupName {
     const eid = info.entity_id;
     const so = info.sortOrder;
 
-    if (so === 1 || so === 2) return 'Power';
+    // Power group dropped. Battery (1) is hero-filtered; voltages (2) go
+    // to Status (battery_voltage is hero-filtered, leaving Ch1 Voltage etc.).
+    if (so === 2) return 'Status';
     if (so === 6) return 'Radio · configuration';
-    if (so === 4 || so === 5 || so === 9 || so === 10) return 'Radio · live';
+    if (so === 4 || so === 5 || so === 9 || so === 10 || so === 11 || so === 12)
+      return 'Radio · live';
     if (eid.includes('noise_floor') || eid.includes('tx_queue')) return 'Radio · live';
 
     if (eid.includes('frequency') || eid.includes('bandwidth')
@@ -581,6 +614,168 @@ export class NodeSummary extends LitElement {
     return evaluateSensor(key, raw);
   }
 
+  // ─── Radio composite rows ─────────────────────────────────────────────
+
+  /** Build the two stacked-bar rows in Radio · live:
+   *  - Airtime (cumulative): TX / RX as % of total uptime.
+   *  - Airtime utilization (windowed): the latest reporting interval's
+   *    TX / RX util sum to ≤ 100% with idle filling the rest.
+   *  Both consume their component entities so the table doesn't show
+   *  the four individual airtime rows separately. */
+  private _buildRadioCompositeRows(consumed: Set<string>): TemplateResult[] {
+    const rows: TemplateResult[] = [];
+
+    // ─── Cumulative airtime as % of uptime ─────────────────────────────
+    const airtimeRaw = this._findEntityByLabel('Airtime');
+    const rxAirtimeRaw = this._findEntityByLabel('RX Airtime');
+    const uptime = this._findByMetric('uptime_hours');
+
+    if ((airtimeRaw || rxAirtimeRaw) && uptime) {
+      const txSec = airtimeRaw
+        ? this._timeValueInSeconds(airtimeRaw.entity_id)
+        : 0;
+      const rxSec = rxAirtimeRaw
+        ? this._timeValueInSeconds(rxAirtimeRaw.entity_id)
+        : 0;
+      const upSec = this._timeValueInSeconds(uptime.entity_id);
+
+      if (Number.isFinite(upSec) && upSec > 0) {
+        const txPct = Math.max(0, (txSec / upSec) * 100);
+        const rxPct = Math.max(0, (rxSec / upSec) * 100);
+        const idlePct = Math.max(0, 100 - txPct - rxPct);
+
+        const segs: StackedBarSegment[] = [
+          { value: txPct,   label: `TX ${txPct.toFixed(2)}%`,   kind: 'tx' },
+          { value: rxPct,   label: `RX ${rxPct.toFixed(2)}%`,   kind: 'rx' },
+          { value: idlePct, label: `Idle ${idlePct.toFixed(1)}%`, kind: 'idle' },
+        ];
+
+        // Use the worse of the two band classifications for the dot.
+        const band = this._worseBand(
+          evaluateSensor('tx_airtime_util', txPct).band,
+          evaluateSensor('rx_airtime_util', rxPct).band,
+        );
+
+        rows.push(html`
+          <tr class="data-row stacked-row"
+              @click=${() => airtimeRaw && this._fireMoreInfo(airtimeRaw.entity_id)}>
+            <td class="col-status">
+              <span class="status-dot ${band}"></span>
+            </td>
+            <td class="col-label">
+              Airtime
+              ${this._renderInfoTip({
+                band,
+                fillPct: 0,
+                tooltip:
+                  'Cumulative TX and RX airtime as a percentage of total ' +
+                  'uptime. Bar represents 100% of uptime; segments are TX, ' +
+                  'RX, and idle.',
+              })}
+            </td>
+            <td class="col-value">${(txPct + rxPct).toFixed(2)}%</td>
+            <td class="col-bar">
+              <meshcore-stacked-bar
+                .segments=${segs}
+                .total=${100}
+                .legend=${'inline'}>
+              </meshcore-stacked-bar>
+            </td>
+          </tr>
+        `);
+
+        if (airtimeRaw) consumed.add(airtimeRaw.entity_id);
+        if (rxAirtimeRaw) consumed.add(rxAirtimeRaw.entity_id);
+      }
+    }
+
+    // ─── Windowed airtime utilization (TX util + RX util + Idle = 100) ──
+    const txUtil = this._findByMetric('tx_airtime_util');
+    const rxUtil = this._findByMetric('rx_airtime_util');
+    if (txUtil || rxUtil) {
+      const txN = txUtil ? this._readNumber(txUtil.entity_id) : NaN;
+      const rxN = rxUtil ? this._readNumber(rxUtil.entity_id) : NaN;
+      const txF = Number.isFinite(txN) ? Math.max(0, txN) : 0;
+      const rxF = Number.isFinite(rxN) ? Math.max(0, rxN) : 0;
+      const idleF = Math.max(0, 100 - txF - rxF);
+
+      const segs: StackedBarSegment[] = [
+        { value: txF,   label: `TX ${txF.toFixed(1)}%`,   kind: 'tx' },
+        { value: rxF,   label: `RX ${rxF.toFixed(1)}%`,   kind: 'rx' },
+        { value: idleF, label: `Idle ${idleF.toFixed(1)}%`, kind: 'idle' },
+      ];
+
+      const band = this._worseBand(
+        evaluateSensor('tx_airtime_util', txF).band,
+        evaluateSensor('rx_airtime_util', rxF).band,
+      );
+
+      rows.push(html`
+        <tr class="data-row stacked-row"
+            @click=${() => txUtil && this._fireMoreInfo(txUtil.entity_id)}>
+          <td class="col-status">
+            <span class="status-dot ${band}"></span>
+          </td>
+          <td class="col-label">
+            Airtime utilization
+            ${this._renderInfoTip({
+              band,
+              fillPct: 0,
+              tooltip:
+                'Windowed TX and RX airtime utilization over the last ' +
+                'reporting interval. Bar segments sum to ≤ 100%; idle ' +
+                'fills the rest.',
+            })}
+          </td>
+          <td class="col-value">${(txF + rxF).toFixed(1)}%</td>
+          <td class="col-bar">
+            <meshcore-stacked-bar
+              .segments=${segs}
+              .total=${100}
+              .legend=${'inline'}>
+            </meshcore-stacked-bar>
+          </td>
+        </tr>
+      `);
+
+      if (txUtil) consumed.add(txUtil.entity_id);
+      if (rxUtil) consumed.add(rxUtil.entity_id);
+    }
+
+    return rows;
+  }
+
+  /** Read a sensor's state value and convert via its unit_of_measurement
+   *  attribute to seconds. Used for the cumulative airtime composite. */
+  private _timeValueInSeconds(entityId: string): number {
+    const raw = this._readNumber(entityId);
+    if (!Number.isFinite(raw)) return NaN;
+    const unit = (this.hass?.states[entityId]?.attributes
+                  ?.unit_of_measurement as string) ?? 's';
+    switch (unit) {
+      case 'd':   return raw * 86400;
+      case 'h':   return raw * 3600;
+      case 'min': return raw * 60;
+      case 's':
+      default:    return raw;
+    }
+  }
+
+  /** Read a *_rate sensor's state directly from hass.states (rate sensors
+   *  are excluded from `this.entities` by classify-entity, so we derive
+   *  the rate entity_id from the totals entity_id by inserting `_rate`
+   *  before the device-name suffix). Returns NaN if not present. */
+  private _readDerivedRate(totalsEid: string, key: string): number {
+    // entity_id pattern: sensor.meshcore_<prefix>_<key>_<device-suffix>
+    // rate variant:     sensor.meshcore_<prefix>_<key>_rate_<device-suffix>
+    const rateEid = totalsEid.replace(`_${key}_`, `_${key}_rate_`);
+    if (!this.hass?.states[rateEid]) return NaN;
+    const s = this.hass.states[rateEid].state;
+    if (s === 'unavailable' || s === 'unknown') return NaN;
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   // ─── Traffic composite rows ───────────────────────────────────────────
 
   private _buildTrafficRows(consumed: Set<string>): TemplateResult[] {
@@ -601,7 +796,13 @@ export class NodeSummary extends LitElement {
         { value: direct, label: `Direct ${direct}`, kind: 'direct' },
         { value: other,  label: `Other ${other}`,   kind: 'other' },
       ];
-      rows.push(this._renderTrafficRow('Messages sent', totalSent, segs));
+      const sentRate = this._readDerivedRate(nbSent.entity_id, 'nb_sent');
+      rows.push(this._renderTrafficRow(
+        'Messages sent',
+        totalSent,
+        segs,
+        Number.isFinite(sentRate) ? `${sentRate.toFixed(1)} msg/min` : undefined,
+      ));
       [nbSent, sentFlood, sentDirect].forEach((e) => e && consumed.add(e.entity_id));
     }
 
@@ -630,6 +831,11 @@ export class NodeSummary extends LitElement {
       const dupRatio = totalRecv > 0 ? (totalDups / totalRecv) * 100 : 0;
       const dupBand = evaluateSensor('duplicate_ratio', dupRatio).band;
 
+      const recvRate = this._readDerivedRate(nbRecv.entity_id, 'nb_recv');
+      const recvRateAnnotation = Number.isFinite(recvRate)
+        ? `${recvRate.toFixed(1)} msg/min`
+        : undefined;
+
       rows.push(html`
         <tr class="data-row stacked-row"
             @click=${() => this._fireMoreInfo(nbRecv.entity_id)}>
@@ -643,6 +849,9 @@ export class NodeSummary extends LitElement {
               .segments=${segs}
               .legend=${'inline'}>
             </meshcore-stacked-bar>
+            ${recvRateAnnotation
+              ? html`<div class="rate-annotation">${recvRateAnnotation}</div>`
+              : nothing}
             ${totalDups > 0
               ? html`<div class="dup-annotation">
                   + <span class="num" style="color: var(--${dupBand})">
@@ -708,6 +917,7 @@ export class NodeSummary extends LitElement {
     label: string,
     total: number,
     segments: StackedBarSegment[],
+    rateAnnotation?: string,
   ) {
     return html`
       <tr class="data-row stacked-row">
@@ -721,6 +931,9 @@ export class NodeSummary extends LitElement {
             .segments=${segments}
             .legend=${'inline'}>
           </meshcore-stacked-bar>
+          ${rateAnnotation
+            ? html`<div class="rate-annotation">${rateAnnotation}</div>`
+            : nothing}
         </td>
       </tr>
     `;

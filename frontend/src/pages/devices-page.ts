@@ -804,6 +804,15 @@ export class DevicesPage extends LitElement {
     const showNeighbors = type === 'repeater' && device.neighbors_enabled;
     const neighborState = this._neighborData[device.pubkey_prefix];
 
+    // Append uptime to the status label when online ("Online · 12d 19h").
+    // node-summary hides the uptime row from the table because the value
+    // lives here. Look up the uptime entity via the entity classifier's
+    // metricKey tag.
+    const uptimeInfo = entities.find(e => e.metricKey === 'uptime_hours');
+    const uptimeLabel = isOnline && uptimeInfo
+      ? this._formatUptimeFromEntity(uptimeInfo.entity_id)
+      : '';
+
     // Lazy-load neighbors on first render if enabled
     if (showNeighbors && !neighborState) {
       this._loadNeighbors(device);
@@ -835,7 +844,7 @@ export class DevicesPage extends LitElement {
                  @click=${() => device.status_entity_id && this._fireMoreInfo(device.status_entity_id)}
                  style="${device.status_entity_id ? 'cursor:pointer' : ''}">
               <span class="status-dot ${statusClass}"></span>
-              ${statusLabel}
+              ${statusLabel}${uptimeLabel ? html` · ${uptimeLabel}` : nothing}
             </div>
           </div>
         </div>
@@ -844,7 +853,7 @@ export class DevicesPage extends LitElement {
           ? html`
               <meshcore-node-summary
                 .hass=${this.hass}
-                .device=${device}
+                .device=${{ ...device, type }}
                 .entities=${entities}
                 .hiddenCount=${hiddenCount}>
               </meshcore-node-summary>
@@ -1116,6 +1125,34 @@ export class DevicesPage extends LitElement {
       composed: true,
     });
     this.dispatchEvent(event);
+  }
+
+  /** Format an uptime sensor's value as "12d 19h" / "5h 30m" / "47s".
+   *  Reads the unit_of_measurement attribute to handle d/h/min/s. */
+  private _formatUptimeFromEntity(entityId: string): string {
+    const s = this.hass?.states[entityId];
+    if (!s || s.state === 'unavailable' || s.state === 'unknown') return '';
+    const raw = parseFloat(s.state);
+    if (!Number.isFinite(raw)) return '';
+    const unit = (s.attributes?.unit_of_measurement as string) ?? 's';
+    let totalSec: number;
+    switch (unit) {
+      case 'd':   totalSec = raw * 86400; break;
+      case 'h':   totalSec = raw * 3600; break;
+      case 'min': totalSec = raw * 60; break;
+      case 's':
+      default:    totalSec = raw; break;
+    }
+    if (totalSec < 60) return `${Math.floor(totalSec)}s`;
+    if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m`;
+    if (totalSec < 86400) {
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      return m > 0 ? `${h}h ${m}m` : `${h}h`;
+    }
+    const d = Math.floor(totalSec / 86400);
+    const h = Math.floor((totalSec % 86400) / 3600);
+    return h > 0 ? `${d}d ${h}h` : `${d}d`;
   }
 
   // ─── Dialogs ──────────────────────────────────────────────────────
