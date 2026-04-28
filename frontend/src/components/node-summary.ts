@@ -131,6 +131,16 @@ export class NodeSummary extends LitElement {
       font-weight: 500;
       color: var(--primary-text-color);
     }
+    /* Clickable TX/RX segments inside Radio activity hero tile */
+    .ra-segment {
+      cursor: pointer;
+      border-radius: 3px;
+      padding: 0 2px;
+      transition: background 0.15s;
+    }
+    .ra-segment:hover {
+      background: rgba(127, 127, 127, 0.18);
+    }
 
     /* ─── Status dots ─── */
     .status-dot {
@@ -392,6 +402,19 @@ export class NodeSummary extends LitElement {
       { value: idleN, label: `Idle ${idleN.toFixed(1)}%`, kind: 'idle' },
     ];
 
+    // Click handlers for the TX / RX text segments — open more-info for
+    // the corresponding utilization entity. Idle has no entity to deep-link
+    // to, so it stays plain text. Each handler stops propagation so the
+    // parent tile's click doesn't double-fire.
+    const onTxClick = (e: Event) => {
+      e.stopPropagation();
+      if (tx) this._fireMoreInfo(tx.entity_id);
+    };
+    const onRxClick = (e: Event) => {
+      e.stopPropagation();
+      if (rx) this._fireMoreInfo(rx.entity_id);
+    };
+
     return html`
       <div class="hero-tile"
            @click=${() => tx && this._fireMoreInfo(tx.entity_id)}>
@@ -408,7 +431,16 @@ export class NodeSummary extends LitElement {
         </div>
         <div class="hero-tile-value">
           <span class="compact">
-            TX ${txN.toFixed(1)}% · RX ${rxN.toFixed(1)}% · Idle ${idleN.toFixed(1)}%
+            ${tx
+              ? html`<span class="ra-segment" @click=${onTxClick}
+                  >TX ${txN.toFixed(1)}%</span>`
+              : html`<span>TX ${txN.toFixed(1)}%</span>`}
+            ·
+            ${rx
+              ? html`<span class="ra-segment" @click=${onRxClick}
+                  >RX ${rxN.toFixed(1)}%</span>`
+              : html`<span>RX ${rxN.toFixed(1)}%</span>`}
+            · Idle ${idleN.toFixed(1)}%
           </span>
         </div>
         <meshcore-stacked-bar
