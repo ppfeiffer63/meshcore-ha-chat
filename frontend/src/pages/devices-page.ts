@@ -4,6 +4,7 @@ import { panelStyles } from '../styles';
 import type { HomeAssistant, PanelConfig, ManagedDevice, MeshCoreDevice, NeighborInfo } from '../types';
 import { getManagedDevices, executeRemote, getNeighbors } from '../api';
 import '../components/sensor-tile';
+import '../components/node-summary';
 import '../components/snr-chart';
 import '../components/confirm-dialog';
 import '../components/command-dialog';
@@ -841,18 +842,12 @@ export class DevicesPage extends LitElement {
 
         ${entities.length > 0
           ? html`
-              <div class="subsection-label">Sensors${hiddenCount > 0 ? html` <span style="opacity:0.6">(${hiddenCount} hidden)</span>` : nothing}</div>
-              <div class="sensor-grid">
-                ${entities.map(e => html`
-                  <meshcore-sensor-tile
-                    .hass=${this.hass}
-                    .entityId=${e.entity_id}
-                    .label=${e.label}
-                    .icon=${e.icon}
-                    .colorScheme=${e.colorScheme}>
-                  </meshcore-sensor-tile>
-                `)}
-              </div>
+              <meshcore-node-summary
+                .hass=${this.hass}
+                .device=${device}
+                .entities=${entities}
+                .hiddenCount=${hiddenCount}>
+              </meshcore-node-summary>
             `
           : nothing}
 
