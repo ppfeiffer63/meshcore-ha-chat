@@ -13,6 +13,16 @@
 // binary_sensors were not filtered, and a name-substring match on "temp"
 // produced false-positive Temperature tiles for any peer whose advertised
 // name contained that 4-letter sequence.
+//
+// `metricKey` is an optional tag that the node-summary card (see
+// docs/Proposed - Sensor Aggregation Card.md) uses to look up threshold
+// bands via evaluateSensor(). Branches whose value is informational-only
+// (TX power, raw airtime seconds, voltage, temperature) intentionally
+// leave metricKey unset — Q3 of the proposal locks the bar-colour driver
+// to battery_percentage rather than voltage, and the threshold table
+// names tx_power / sf / bw / frequency as informational-only.
+
+import type { MetricKey } from './sensor-thresholds';
 
 export interface EntityInfo {
   entity_id: string;
@@ -20,6 +30,10 @@ export interface EntityInfo {
   icon: string;
   colorScheme: 'battery' | 'signal' | 'neutral';
   sortOrder: number;
+  /** Optional threshold-table key. Undefined for informational metrics
+   *  that don't drive a coloured band (voltage, TX power, temperature,
+   *  raw airtime seconds, contacts count, generic catch-all). */
+  metricKey?: MetricKey;
 }
 
 export interface MeshcoreRegistryResult {
@@ -54,18 +68,25 @@ export function classifyEntity(entity: any): EntityInfo | null {
   // --- Step 3: classify by HA device_class ---
   if (dc === 'battery') {
     return { entity_id: eid, label: 'Battery', icon: 'battery',
-             colorScheme: 'battery', sortOrder: 1 };
+             colorScheme: 'battery', sortOrder: 1,
+             metricKey: 'battery_pct' };
   }
   if (dc === 'voltage') {
+    // Q3: voltage is informational only. No metricKey — chemistry varies
+    // per board and the integration doesn't expose chemistry per node.
     return { entity_id: eid, label: 'Voltage', icon: 'power',
              colorScheme: 'neutral', sortOrder: 2 };
   }
   if (dc === 'duration') {
+    // Uptime is reported in seconds; node-summary divides by 3600 before
+    // calling evaluateSensor('uptime_hours', ...).
     return { entity_id: eid, label: 'Uptime', icon: 'clock',
-             colorScheme: 'neutral', sortOrder: 3 };
+             colorScheme: 'neutral', sortOrder: 3,
+             metricKey: 'uptime_hours' };
   }
   if (dc === 'signal_strength') {
-    // Currently only TX Power uses signal_strength in meshcore.
+    // Currently only TX Power uses signal_strength in meshcore. TX Power
+    // is informational (regulatory ceilings vary per region) — no metricKey.
     return { entity_id: eid, label: 'TX Power', icon: 'power',
              colorScheme: 'neutral', sortOrder: 6 };
   }
@@ -75,19 +96,22 @@ export function classifyEntity(entity: any): EntityInfo | null {
   }
   if (dc === 'power_factor') {
     // Airtime Utilization / RX Airtime Utilization (both use power_factor).
-    const label = eid.includes('rx_') ? 'RX Airtime Util' : 'Airtime Util';
-    return { entity_id: eid, label, icon: 'chart',
-             colorScheme: 'neutral', sortOrder: 10 };
+    const isRx = eid.includes('rx_');
+    return { entity_id: eid, label: isRx ? 'RX Airtime Util' : 'Airtime Util',
+             icon: 'chart', colorScheme: 'neutral', sortOrder: 10,
+             metricKey: isRx ? 'rx_airtime_util' : 'tx_airtime_util' };
   }
 
   // --- Step 4: entity_id substring fallback (categories without a device_class) ---
   if (eid.includes('snr') && !eid.includes('neighbor')) {
     return { entity_id: eid, label: 'SNR', icon: 'signal',
-             colorScheme: 'signal', sortOrder: 4 };
+             colorScheme: 'signal', sortOrder: 4,
+             metricKey: 'snr' };
   }
   if (eid.includes('rssi')) {
     return { entity_id: eid, label: 'RSSI', icon: 'signal',
-             colorScheme: 'signal', sortOrder: 5 };
+             colorScheme: 'signal', sortOrder: 5,
+             metricKey: 'rssi' };
   }
   if (eid.includes('contact_count')) {
     return { entity_id: eid, label: 'Contacts', icon: 'counter',
@@ -95,13 +119,15 @@ export function classifyEntity(entity: any): EntityInfo | null {
   }
   if (eid.includes('airtime') || eid.includes('air_util')) {
     // Raw airtime without power_factor device_class. Utilization variants
-    // were already caught in Step 3.
+    // were already caught in Step 3. Raw airtime (total seconds transmitting)
+    // is informational — no banded threshold maps to seconds.
     return { entity_id: eid, label: 'Airtime', icon: 'chart',
              colorScheme: 'neutral', sortOrder: 9 };
   }
   if (eid.includes('channel_util')) {
     return { entity_id: eid, label: 'Channel Util', icon: 'chart',
-             colorScheme: 'neutral', sortOrder: 10 };
+             colorScheme: 'neutral', sortOrder: 10,
+             metricKey: 'channel_util' };
   }
 
   // --- Step 5: generic meshcore sensor catch-all ---
