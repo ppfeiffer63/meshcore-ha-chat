@@ -66,6 +66,72 @@ def _get_all_coordinators(hass: HomeAssistant) -> list:
     ]
 
 
+# One-shot guard so the legacy-fallback warning fires at most once per
+# process — without this, a busy panel that polls contacts every few
+# seconds against an old meshcore install would flood the log.
+_LEGACY_CONTACTS_FALLBACK_LOGGED = False
+
+
+async def _get_contacts_via_service(
+    hass: HomeAssistant, entry_id: str | None = None
+) -> list | None:
+    """Fetch contacts via the documented meshcore.get_contacts service.
+
+    Returns the contacts list on success, an empty list when the service
+    reports an error envelope (no_coordinator / coordinator_error), or
+    None when there is no MeshCore coordinator at all (caller maps to
+    "not_found"). Callers that need to distinguish "no coordinator" from
+    "service-side error" should inspect the legacy direct-coordinator
+    path instead — but in practice the chat panel just shows a generic
+    "no coordinator" toast in either case.
+
+    Falls back to ``coordinator.get_all_contacts()`` on installs running
+    meshcore<2.6.0 (no service registered), so existing users don't lose
+    contact-list functionality during the version-floor announcement
+    window. The fallback warning is logged at most once per process.
+    """
+    if not hass.services.has_service(MESHCORE_DOMAIN, "get_contacts"):
+        global _LEGACY_CONTACTS_FALLBACK_LOGGED
+        if not _LEGACY_CONTACTS_FALLBACK_LOGGED:
+            _LOGGER.warning(
+                "meshcore.get_contacts service not registered — falling back "
+                "to coordinator.get_all_contacts(). Upgrade to meshcore>=2.6.0 "
+                "for the documented public surface."
+            )
+            _LEGACY_CONTACTS_FALLBACK_LOGGED = True
+        coordinator = _get_coordinator(hass, entry_id)
+        if not coordinator:
+            return None
+        return list(coordinator.get_all_contacts() or [])
+
+    service_data: dict = {}
+    if entry_id:
+        service_data["entry_id"] = entry_id
+
+    try:
+        result = await hass.services.async_call(
+            MESHCORE_DOMAIN,
+            "get_contacts",
+            service_data,
+            blocking=True,
+            return_response=True,
+        )
+    except Exception as ex:
+        _LOGGER.error("meshcore.get_contacts service call failed: %s", ex)
+        return None
+
+    if not result:
+        return None
+    # Service returns {"contacts": [...]} on success and
+    # {"contacts": [], "error": "..."} on error envelopes. Treat either
+    # as "no usable data" by checking for a non-empty list before the
+    # presence-of-error flag — the chat doesn't surface the upstream
+    # error string today, so collapse to the existing "not_found" UX.
+    if "error" in result and not result.get("contacts"):
+        return None
+    return list(result.get("contacts") or [])
+
+
 def _get_store(
     hass: HomeAssistant, entry_id: str | None = None
 ) -> MessageStore | None:
@@ -178,15 +244,19 @@ def ws_get_devices(hass, connection, msg):
         vol.Optional("entry_id"): str,
     }
 )
-@callback
-def ws_get_contacts(hass, connection, msg):
-    """Return all contacts for the specified (or first) config entry."""
-    coordinator = _get_coordinator(hass, msg.get("entry_id"))
-    if not coordinator:
+@websocket_api.async_response
+async def ws_get_contacts(hass, connection, msg):
+    """Return all contacts for the specified (or first) config entry.
+
+    Delegates to the upstream meshcore.get_contacts service (PR #216,
+    meshcore>=2.6.0), with a legacy fallback to
+    coordinator.get_all_contacts() for users on older meshcore — see
+    _get_contacts_via_service.
+    """
+    contacts = await _get_contacts_via_service(hass, msg.get("entry_id"))
+    if contacts is None:
         connection.send_error(msg["id"], "not_found", "No MeshCore coordinator found")
         return
-
-    contacts = coordinator.get_all_contacts()
     connection.send_result(msg["id"], {"contacts": contacts})
 
 
@@ -234,17 +304,17 @@ def _compute_type_counts(contacts: list) -> dict:
         ),
     }
 )
-@callback
-def ws_get_contacts_paginated(hass, connection, msg):
+@websocket_api.async_response
+async def ws_get_contacts_paginated(hass, connection, msg):
     """Return paginated contacts with filtering and type counts.
 
-    Inlined from upstream feature/sidebar-panel `coordinator.get_contacts_paginated`
-    — companion-supporting `dev/combined` doesn't ship that helper. All filtering
-    and sorting runs against `coordinator.get_all_contacts()`. See `_compute_type_counts`.
-    TODO(v0.2): hoist into `coordinator_facade`.
+    Filters/sorts/paginates the contact list returned by upstream's
+    meshcore.get_contacts service (PR #216, meshcore>=2.6.0). The
+    upstream service deliberately doesn't ship a paginated/filtered
+    variant — companions own this layer.
     """
-    coordinator = _get_coordinator(hass, msg.get("entry_id"))
-    if not coordinator:
+    all_contacts = await _get_contacts_via_service(hass, msg.get("entry_id"))
+    if all_contacts is None:
         connection.send_error(msg["id"], "not_found", "No MeshCore coordinator found")
         return
 
@@ -254,8 +324,6 @@ def ws_get_contacts_paginated(hass, connection, msg):
     limit = msg["limit"]
     offset = msg["offset"]
     sort_by = msg["sort_by"]
-
-    all_contacts = coordinator.get_all_contacts()
 
     # Category filter (added vs discovered)
     if category == "added":
@@ -317,21 +385,19 @@ def ws_get_contacts_paginated(hass, connection, msg):
         vol.Optional("entry_id"): str,
     }
 )
-@callback
-def ws_get_node_counts(hass, connection, msg):
+@websocket_api.async_response
+async def ws_get_node_counts(hass, connection, msg):
     """Return node counts for each primary filter category.
 
-    Inlined from upstream feature/sidebar-panel `coordinator.get_node_counts` —
-    companion-supporting `dev/combined` doesn't ship that helper. Counts are
-    derived from `coordinator.get_all_contacts()`. TODO(v0.2): hoist into
-    `coordinator_facade`.
+    Counts are derived from the contact list returned by upstream's
+    meshcore.get_contacts service (PR #216, meshcore>=2.6.0). Like
+    paginated, this filtering layer is owned by the companion.
     """
-    coordinator = _get_coordinator(hass, msg.get("entry_id"))
-    if not coordinator:
+    all_contacts = await _get_contacts_via_service(hass, msg.get("entry_id"))
+    if all_contacts is None:
         connection.send_error(msg["id"], "not_found", "No MeshCore coordinator found")
         return
 
-    all_contacts = coordinator.get_all_contacts()
     added = sum(1 for c in all_contacts if c.get("added_to_node"))
     discovered = sum(1 for c in all_contacts if not c.get("added_to_node"))
     connection.send_result(
