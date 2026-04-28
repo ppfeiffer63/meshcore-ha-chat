@@ -70,6 +70,13 @@ export class NodeSummary extends LitElement {
   @property({ type: Object }) device?: NodeSummaryDevice;
   @property({ type: Array }) entities: EntityInfo[] = [];
   @property({ type: Number }) hiddenCount = 0;
+  /** Fallback location for nodes that don't expose lat/lon as sensor
+   *  entities (typical for managed repeaters/clients — their location
+   *  comes from the user's contact list via Contact.adv_lat/adv_lon).
+   *  When set and no dedicated entity is found, the Location hero tile
+   *  shows these. */
+  @property({ type: Number }) fallbackLatitude?: number;
+  @property({ type: Number }) fallbackLongitude?: number;
 
   static styles = css`
     :host { display: block; }
@@ -416,16 +423,34 @@ export class NodeSummary extends LitElement {
   private _renderLocationTile() {
     const lat = this._findEntityIdMatching('latitude');
     const lon = this._findEntityIdMatching('longitude');
-    const latVal = lat ? this._readNumber(lat.entity_id) : NaN;
-    const lonVal = lon ? this._readNumber(lon.entity_id) : NaN;
+    let latVal = lat ? this._readNumber(lat.entity_id) : NaN;
+    let lonVal = lon ? this._readNumber(lon.entity_id) : NaN;
+    let source: 'entity' | 'fallback' = 'entity';
+
+    // Fallback to caller-supplied lat/lon (typically Contact.adv_lat/lon
+    // for managed devices that don't have dedicated location sensors).
+    if (!Number.isFinite(latVal) && Number.isFinite(this.fallbackLatitude!)) {
+      latVal = this.fallbackLatitude!;
+      source = 'fallback';
+    }
+    if (!Number.isFinite(lonVal) && Number.isFinite(this.fallbackLongitude!)) {
+      lonVal = this.fallbackLongitude!;
+      source = 'fallback';
+    }
+
     const hasGps = Number.isFinite(latVal) && Number.isFinite(lonVal)
                    && (latVal !== 0 || lonVal !== 0);
 
+    const onClick = () => {
+      if (lat) this._fireMoreInfo(lat.entity_id);
+    };
+
     return html`
-      <div class="hero-tile"
-           @click=${() => lat && this._fireMoreInfo(lat.entity_id)}>
+      <div class="hero-tile" @click=${onClick}>
         <div class="hero-tile-head">
-          <span>Location</span>
+          <span>Location${source === 'fallback'
+            ? html`<span style="opacity:0.55;text-transform:none;letter-spacing:0;font-size:10px;margin-left:4px;">via contact</span>`
+            : nothing}</span>
         </div>
         <div class="hero-tile-value">
           ${hasGps
@@ -468,10 +493,14 @@ export class NodeSummary extends LitElement {
   // ─── Sensor table grouping ────────────────────────────────────────────
 
   private _buildGroups(): { name: GroupName; rows: TemplateResult[] }[] {
+    // Insertion order is the render order. Traffic · totals leads because
+    // the cumulative + composition view is the most actionable summary
+    // for the typical operator question ("is this repeater carrying
+    // traffic?"). Radio · live, configuration, status, identity follow.
     const groups: Record<GroupName, TemplateResult[]> = {
+      'Traffic · totals': [],
       'Radio · live': [],
       'Radio · configuration': [],
-      'Traffic · totals': [],
       'Status': [],
       'Identity': [],
     };

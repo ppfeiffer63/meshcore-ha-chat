@@ -1,8 +1,8 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { panelStyles } from '../styles';
-import type { HomeAssistant, PanelConfig, ManagedDevice, MeshCoreDevice, NeighborInfo } from '../types';
-import { getManagedDevices, executeRemote, getNeighbors } from '../api';
+import type { HomeAssistant, PanelConfig, ManagedDevice, MeshCoreDevice, NeighborInfo, Contact } from '../types';
+import { getManagedDevices, executeRemote, getNeighbors, getContacts } from '../api';
 import '../components/sensor-tile';
 import '../components/node-summary';
 import '../components/snr-chart';
@@ -22,6 +22,10 @@ export class DevicesPage extends LitElement {
     repeaters: [],
     clients: [],
   };
+
+  /** Contacts indexed by pubkey_prefix for cheap location-fallback
+   *  lookup at render time. Loaded once after device fetch. */
+  @state() private _contactsByPrefix: Record<string, Contact> = {};
 
   @state() private _loading = true;
   @state() private _error: string | null = null;
@@ -813,6 +817,13 @@ export class DevicesPage extends LitElement {
       ? this._formatUptimeFromEntity(uptimeInfo.entity_id)
       : '';
 
+    // Look up the contact for this device by pubkey_prefix to surface its
+    // lat/lon as the Location hero tile fallback when no dedicated
+    // location sensors exist (typical for managed repeaters/clients).
+    const contact = this._contactsByPrefix[device.pubkey_prefix?.toLowerCase()];
+    const fallbackLat = contact?.adv_lat;
+    const fallbackLon = contact?.adv_lon;
+
     // Lazy-load neighbors on first render if enabled
     if (showNeighbors && !neighborState) {
       this._loadNeighbors(device);
@@ -855,7 +866,9 @@ export class DevicesPage extends LitElement {
                 .hass=${this.hass}
                 .device=${{ ...device, type }}
                 .entities=${entities}
-                .hiddenCount=${hiddenCount}>
+                .hiddenCount=${hiddenCount}
+                .fallbackLatitude=${fallbackLat}
+                .fallbackLongitude=${fallbackLon}>
               </meshcore-node-summary>
             `
           : nothing}
@@ -1094,10 +1107,29 @@ export class DevicesPage extends LitElement {
       this._error = null;
       const result = await getManagedDevices(this.hass, this.config?.node_prefix);
       this._managedDevices = result;
+      // Load contacts in parallel so the Location hero tile has fallback
+      // lat/lon for managed devices that don't expose location sensors.
+      // Failure is non-fatal — Location tile will just render "—".
+      this._loadContacts();
     } catch (error) {
       this._error = `Failed to load devices: ${String(error)}`;
     } finally {
       this._loading = false;
+    }
+  }
+
+  private async _loadContacts() {
+    if (!this.hass) return;
+    try {
+      const entryId = this.selectedDevice?.entry_id || this.config?.node_prefix;
+      const contacts = await getContacts(this.hass, entryId);
+      const indexed: Record<string, Contact> = {};
+      for (const c of contacts) {
+        if (c.pubkey_prefix) indexed[c.pubkey_prefix.toLowerCase()] = c;
+      }
+      this._contactsByPrefix = indexed;
+    } catch {
+      // Best-effort; absence just means no fallback location.
     }
   }
 
