@@ -145,6 +145,11 @@ export class NodeSummary extends LitElement {
       background: rgba(127, 127, 127, 0.18);
     }
 
+    /* Bar + custom legend wrapper — keeps the legend tight to the bar
+       (4px) regardless of the hero-tile's 8px flex-column gap, matching
+       the spacing inside Messages Sent / Received tiles. */
+    .ra-bar-wrap { display: block; }
+
     /* Radio activity legend (matches the stacked-bar inline legend
        layout used by Messages Sent / Received) */
     .ra-legend {
@@ -482,29 +487,31 @@ export class NodeSummary extends LitElement {
         <div class="hero-tile-value">
           <span class="primary">${totalUsed.toFixed(1)}<span class="unit">%</span></span>
         </div>
-        <meshcore-stacked-bar
-          .segments=${segments}
-          .total=${100}
-          .legend=${'none'}>
-        </meshcore-stacked-bar>
-        <div class="ra-legend">
-          ${tx
-            ? html`<span class="ra-legend-item" @click=${onTxClick}>
-                <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
-              </span>`
-            : html`<span class="ra-legend-item">
-                <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
-              </span>`}
-          ${rx
-            ? html`<span class="ra-legend-item" @click=${onRxClick}>
-                <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
-              </span>`
-            : html`<span class="ra-legend-item">
-                <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
-              </span>`}
-          <span class="ra-legend-item">
-            <span class="legend-swatch idle"></span>Idle ${idleN.toFixed(1)}%
-          </span>
+        <div class="ra-bar-wrap">
+          <meshcore-stacked-bar
+            .segments=${segments}
+            .total=${100}
+            .legend=${'none'}>
+          </meshcore-stacked-bar>
+          <div class="ra-legend">
+            ${tx
+              ? html`<span class="ra-legend-item" @click=${onTxClick}>
+                  <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
+                </span>`
+              : html`<span class="ra-legend-item">
+                  <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
+                </span>`}
+            ${rx
+              ? html`<span class="ra-legend-item" @click=${onRxClick}>
+                  <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
+                </span>`
+              : html`<span class="ra-legend-item">
+                  <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
+                </span>`}
+            <span class="ra-legend-item">
+              <span class="legend-swatch idle"></span>Idle ${idleN.toFixed(1)}%
+            </span>
+          </div>
         </div>
       </div>
     `;
@@ -541,12 +548,14 @@ export class NodeSummary extends LitElement {
             band: 'info',
             fillPct: 0,
             tooltip:
-              'Messages sent (lifetime). Bar segmented by send mode: ' +
-              'Flood (broadcast retransmits visible to all neighbours); ' +
-              'Direct (routed point-to-point along a path); Other (any ' +
-              'sent packet counted in the total but not classified — ' +
-              'typically zero; the firmware design reconciles flood + ' +
-              'direct with nb_sent).',
+              'Messages sent (lifetime). Bar segmented by send mode:\n' +
+              '• Flood — broadcast retransmits visible to all neighbours.\n' +
+              '• Direct — routed point-to-point along a path.\n' +
+              '• Other — any sent packet counted in the total but not ' +
+              'classified (typically 0; the firmware design reconciles ' +
+              'flood + direct with nb_sent). Non-zero "Other" suggests a ' +
+              'firmware version that emits packet types this UI does not ' +
+              'yet recognise.',
           })}</span>
           <span class="status-dot info"></span>
         </div>
@@ -605,14 +614,20 @@ export class NodeSummary extends LitElement {
             band: 'info',
             fillPct: 0,
             tooltip:
-              'Messages received (lifetime). Bar segmented by receive ' +
-              'mode: Flood (broadcast packets received and re-transmitted ' +
-              'on this repeater); Direct (routed packets where this ' +
-              'repeater is on the path). Duplicates are tracked separately ' +
-              'and do NOT contribute to the total — they appear as an ' +
-              'annotation. Dup ratio bands: Green < 5%, Yellow 5–10%, ' +
-              'Red > 10%. High dup rate suggests network loops or path ' +
-              'degradation.',
+              'Messages received (lifetime). Bar segmented by receive mode:\n' +
+              '• Flood — broadcast packets received from neighbours.\n' +
+              '• Direct — routed packets where this repeater is on the path.\n' +
+              '• Other — any received packet counted in the total but not ' +
+              'classified (typically 0; nb_recv normally reconciles with ' +
+              'recv_flood + recv_direct). Non-zero "Other" suggests a ' +
+              'firmware version that emits packet types this UI does not ' +
+              'yet recognise.\n\n' +
+              'Duplicates are tracked separately and do NOT contribute to ' +
+              'the total — they appear as an annotation. Dup ratio bands: ' +
+              'Green < 30%, Yellow 30–60%, Red > 60%. In a flooding mesh ' +
+              'a substantial dup ratio is normal: each active neighbour ' +
+              'retransmits the same flood once, so a 2-neighbour repeater ' +
+              'sees roughly 50%, a 3-neighbour repeater ~67%, etc.',
           })}</span>
           <span class="status-dot ${totalDups > 0 ? dupBand : 'info'}"></span>
         </div>

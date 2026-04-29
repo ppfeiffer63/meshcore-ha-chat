@@ -152,7 +152,11 @@ export class StackedBar extends LitElement {
         ? html`
           <div class="stat-bar-legend ${this.legend === 'inline' ? 'inline' : ''}">
             ${this.segments
-              .filter((s) => Number.isFinite(s.value) && s.value > 0)
+              // Legend includes zero-value segments (e.g., "Other 0")
+              // so visually-matching tiles read consistently. The bar
+              // track itself filters them out (zero width is invisible
+              // there).
+              .filter((s) => Number.isFinite(s.value) && s.value >= 0)
               .map(
                 (s) => html`<span><span class="legend-swatch ${s.kind}"></span>${s.label}</span>`,
               )}
