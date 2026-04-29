@@ -10,6 +10,7 @@ export class ContactCard extends LitElement {
   static styles = css`
     :host {
       display: block;
+      height: 100%;
     }
 
     .contact-card {
@@ -22,6 +23,8 @@ export class ContactCard extends LitElement {
       cursor: pointer;
       transition: all 0.15s;
       background: var(--card-background-color, #fff);
+      height: 100%;
+      box-sizing: border-box;
     }
 
     .contact-card:hover {
