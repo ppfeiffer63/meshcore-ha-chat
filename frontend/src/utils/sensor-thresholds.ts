@@ -198,14 +198,19 @@ const METRICS: Record<MetricKey, MetricSpec> = {
 
   duplicate_ratio: {
     displayMin: 0,
-    displayMax: 30,
+    displayMax: 100,
     direction: 'lower_better',
-    classify: (v) => (v > 10 ? 'bad' : v > 5 ? 'warn' : 'good'),
+    classify: (v) => (v > 60 ? 'bad' : v > 30 ? 'warn' : 'good'),
     tooltip:
-      'Green < 5%, Yellow 5–10%, Red > 10%. ' +
-      'High duplicate ratio suggests routing loops or path degradation ' +
-      'where the same packet is reaching this node by multiple paths.',
-    // Editorial.
+      'Green < 30%, Yellow 30–60%, Red > 60%. ' +
+      'In a LoRa flooding mesh, every neighbour within range of a flood ' +
+      'retransmits it, so a busy repeater with multiple active neighbours ' +
+      'normally sees a substantial duplicate ratio. Bands set above the ' +
+      'expected dense-mesh range so only genuine outliers (where the ' +
+      'mesh is congested or routing is broken) trigger a warning.',
+    // Editorial — no published MeshCore source. Original < 5 / 5-10 / > 10
+    // bands flagged healthy flood-dense repeaters; raised after deploy
+    // review.
   },
 
   tx_queue_len: {

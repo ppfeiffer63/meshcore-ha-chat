@@ -189,15 +189,18 @@ describe('evaluateSensor — request_success_rate (editorial)', () => {
   });
 });
 
-describe('evaluateSensor — duplicate_ratio (Q9: <5 / 5-10 / >10)', () => {
-  it('2% → good', () => {
-    expect(evaluateSensor('duplicate_ratio', 2).band).toBe('good');
+describe('evaluateSensor — duplicate_ratio (raised post-iter11: <30 / 30-60 / >60)', () => {
+  // Original Q9 bands (< 5 / 5-10 / > 10) flagged healthy flood-dense
+  // repeaters; raised after a 44.7% dup-ratio repeater-in-good-health
+  // surfaced the false-positive at deploy review.
+  it('10% → good (typical dense-mesh repeater)', () => {
+    expect(evaluateSensor('duplicate_ratio', 10).band).toBe('good');
   });
-  it('7% → warn', () => {
-    expect(evaluateSensor('duplicate_ratio', 7).band).toBe('warn');
+  it('40% → warn', () => {
+    expect(evaluateSensor('duplicate_ratio', 40).band).toBe('warn');
   });
-  it('15% → bad', () => {
-    expect(evaluateSensor('duplicate_ratio', 15).band).toBe('bad');
+  it('70% → bad', () => {
+    expect(evaluateSensor('duplicate_ratio', 70).band).toBe('bad');
   });
 });
 
