@@ -3542,7 +3542,7 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
           .legend=${"inline"}>
         </meshcore-stacked-bar>
       </div>
-    `}_formatCount(e){return Number.isFinite(e)?Math.round(e).toLocaleString():"—"}_renderLocationTile(){const e=this._findEntityIdMatching("latitude"),t=this._findEntityIdMatching("longitude");let i=e?this._readNumber(e.entity_id):NaN,o=t?this._readNumber(t.entity_id):NaN,r="entity";!Number.isFinite(i)&&Number.isFinite(this.fallbackLatitude)&&(i=this.fallbackLatitude,r="fallback"),!Number.isFinite(o)&&Number.isFinite(this.fallbackLongitude)&&(o=this.fallbackLongitude,r="fallback");const a=Number.isFinite(i)&&Number.isFinite(o)&&(0!==i||0!==o);return j`
+    `}_formatCount(e){return Number.isFinite(e)?Math.round(e).toLocaleString():"—"}_renderLocationTile(){const e=this._findEntityIdMatching("latitude"),t=this._findEntityIdMatching("longitude");let i=e?this._readNumber(e.entity_id):NaN,o=t?this._readNumber(t.entity_id):NaN,r="entity";!Number.isFinite(i)&&Number.isFinite(this.fallbackLatitude)&&(i=this.fallbackLatitude,r="fallback"),!Number.isFinite(o)&&Number.isFinite(this.fallbackLongitude)&&(o=this.fallbackLongitude,r="fallback");const a=Number.isFinite(i)&&Number.isFinite(o)&&(0!==i||0!==o);let s=null;if("entity"===r&&e){const t=this.hass?.states[e.entity_id]?.last_updated;if(t){const e=new Date(t);Number.isNaN(e.getTime())||(s=e)}}else"fallback"===r&&Number.isFinite(this.fallbackUpdated)&&(s=new Date(1e3*this.fallbackUpdated));const n=a&&s?this._formatRelativeTime(s):"";return j`
       <div class="hero-tile" @click=${()=>{e&&this._fireMoreInfo(e.entity_id)}}>
         <div class="hero-tile-head">
           <span>Location${"fallback"===r?j`<span style="opacity:0.55;text-transform:none;letter-spacing:0;font-size:10px;margin-left:4px;">via contact</span>`:G}</span>
@@ -3552,8 +3552,9 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
                 ${i.toFixed(4)}, ${o.toFixed(4)}
               </span>`:j`<span class="primary">—</span>`}
         </div>
+        ${n?j`<div class="loc-updated">Updated ${n}</div>`:G}
       </div>
-    `}_renderMeshNodeCountTile(){const e=this._findEntityIdMatching("node_count"),t=e?this._readNumber(e.entity_id):NaN;return j`
+    `}_formatRelativeTime(e){const t=(Date.now()-e.getTime())/1e3;return!Number.isFinite(t)||t<0||t<60?"just now":t<3600?`${Math.floor(t/60)} min ago`:t<86400?`${Math.floor(t/3600)} h ago`:`${Math.floor(t/86400)} d ago`}_renderMeshNodeCountTile(){const e=this._findEntityIdMatching("node_count"),t=e?this._readNumber(e.entity_id):NaN;return j`
       <div class="hero-tile"
            @click=${()=>e&&this._fireMoreInfo(e.entity_id)}>
         <div class="hero-tile-head"><span>Mesh nodes</span></div>
@@ -3760,6 +3761,11 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
       font-size: 13px;
       color: var(--primary-text-color);
     }
+    .loc-updated {
+      font-size: 11px;
+      color: var(--secondary-text-color);
+      margin-top: 2px;
+    }
 
     .dup-annotation {
       font-size: 11px;
@@ -3771,7 +3777,7 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
       font-weight: 500;
       color: var(--warn, #ff9800);
     }
-  `,e([ge({type:Object})],et.prototype,"hass",void 0),e([ge({type:Object})],et.prototype,"device",void 0),e([ge({type:Array})],et.prototype,"entities",void 0),e([ge({type:Number})],et.prototype,"hiddenCount",void 0),e([ge({type:Number})],et.prototype,"fallbackLatitude",void 0),e([ge({type:Number})],et.prototype,"fallbackLongitude",void 0),et=e([pe("meshcore-node-summary")],et);let tt=class extends ce{constructor(){super(...arguments),this.data=[],this.neighbors=[],this.width=600,this.height=200,this.timeRange=24,this.COLORS=["#FF6B6B","#4ECDC4","#FFE66D","#95E1D3","#C7CEEA","#FF8B94","#B5EAD7","#FFB7B2"]}render(){if(!this.data||0===this.data.length||0===this.neighbors.length)return j`
+  `,e([ge({type:Object})],et.prototype,"hass",void 0),e([ge({type:Object})],et.prototype,"device",void 0),e([ge({type:Array})],et.prototype,"entities",void 0),e([ge({type:Number})],et.prototype,"hiddenCount",void 0),e([ge({type:Number})],et.prototype,"fallbackLatitude",void 0),e([ge({type:Number})],et.prototype,"fallbackLongitude",void 0),e([ge({type:Number})],et.prototype,"fallbackUpdated",void 0),et=e([pe("meshcore-node-summary")],et);let tt=class extends ce{constructor(){super(...arguments),this.data=[],this.neighbors=[],this.width=600,this.height=200,this.timeRange=24,this.COLORS=["#FF6B6B","#4ECDC4","#FFE66D","#95E1D3","#C7CEEA","#FF8B94","#B5EAD7","#FFB7B2"]}render(){if(!this.data||0===this.data.length||0===this.neighbors.length)return j`
         <div class="chart-container">
           <div class="empty-state">No data available</div>
         </div>
@@ -4216,7 +4222,7 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
 
       <!-- Status Toast -->
       ${this._statusMessage?j`<div class="status-toast ${this._statusMessage.type}">${"success"===this._statusMessage.type?"✓ ":"✗ "}${this._statusMessage.text}</div>`:G}
-    `:j`<div class="content-area"><div class="loading-state"><div class="loading-spinner"></div> Initializing...</div></div>`}_renderDeviceSections(e,t){return e.map(e=>this._renderDeviceSection(e,t))}_renderDeviceSection(e,t){let i="unknown",o="Unknown";if(e.status_entity_id&&this.hass?.states[e.status_entity_id]){const t=this.hass.states[e.status_entity_id].state;"on"===t?(i="online",o="Online"):"off"===t&&(i="offline",o="Offline")}else e.status&&(i="online"===e.status?"online":"offline"===e.status?"offline":"unknown",o="online"===e.status?"Online":"offline"===e.status?"Offline":"Unknown");const r="online"===i,a=this._getManagedDeviceKey(e,t),s=this._getDeviceEntities(e,t),n=(this._hiddenSensors[a]||[]).length,d="repeater"===t&&e.neighbors_enabled,c=this._neighborData[e.pubkey_prefix],l=s.find(e=>"uptime_hours"===e.metricKey),p=r&&l?this._formatUptimeFromEntity(l.entity_id):"",h=this._contactsByPrefix[e.pubkey_prefix?.toLowerCase()],u=h?.adv_lat,g=h?.adv_lon;return d&&!c&&this._loadNeighbors(e),j`
+    `:j`<div class="content-area"><div class="loading-state"><div class="loading-spinner"></div> Initializing...</div></div>`}_renderDeviceSections(e,t){return e.map(e=>this._renderDeviceSection(e,t))}_renderDeviceSection(e,t){let i="unknown",o="Unknown";if(e.status_entity_id&&this.hass?.states[e.status_entity_id]){const t=this.hass.states[e.status_entity_id].state;"on"===t?(i="online",o="Online"):"off"===t&&(i="offline",o="Offline")}else e.status&&(i="online"===e.status?"online":"offline"===e.status?"offline":"unknown",o="online"===e.status?"Online":"offline"===e.status?"Offline":"Unknown");const r="online"===i,a=this._getManagedDeviceKey(e,t),s=this._getDeviceEntities(e,t),n=(this._hiddenSensors[a]||[]).length,d="repeater"===t&&e.neighbors_enabled,c=this._neighborData[e.pubkey_prefix],l=s.find(e=>"uptime_hours"===e.metricKey),p=r&&l?this._formatUptimeFromEntity(l.entity_id):"",h=this._contactsByPrefix[e.pubkey_prefix?.toLowerCase()],u=h?.adv_lat,g=h?.adv_lon,m=h?.last_advert;return d&&!c&&this._loadNeighbors(e),j`
       <div class="device-section" @tile-context-menu=${e=>this._onTileContextMenu(e,a)}>
         <div class="section-header">
           <div class="section-title">
@@ -4252,7 +4258,8 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
                 .entities=${s}
                 .hiddenCount=${n}
                 .fallbackLatitude=${u}
-                .fallbackLongitude=${g}>
+                .fallbackLongitude=${g}
+                .fallbackUpdated=${m}>
               </meshcore-node-summary>
             `:G}
 

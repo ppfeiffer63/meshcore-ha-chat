@@ -834,9 +834,12 @@ export class DevicesPage extends LitElement {
     // Look up the contact for this device by pubkey_prefix to surface its
     // lat/lon as the Location hero tile fallback when no dedicated
     // location sensors exist (typical for managed repeaters/clients).
+    // Also pass last_advert so the "Updated X ago" line under the coords
+    // reflects when the contact was last heard (Unix seconds).
     const contact = this._contactsByPrefix[device.pubkey_prefix?.toLowerCase()];
     const fallbackLat = contact?.adv_lat;
     const fallbackLon = contact?.adv_lon;
+    const fallbackUpdated = contact?.last_advert;
 
     // Lazy-load neighbors on first render if enabled
     if (showNeighbors && !neighborState) {
@@ -882,7 +885,8 @@ export class DevicesPage extends LitElement {
                 .entities=${entities}
                 .hiddenCount=${hiddenCount}
                 .fallbackLatitude=${fallbackLat}
-                .fallbackLongitude=${fallbackLon}>
+                .fallbackLongitude=${fallbackLon}
+                .fallbackUpdated=${fallbackUpdated}>
               </meshcore-node-summary>
             `
           : nothing}

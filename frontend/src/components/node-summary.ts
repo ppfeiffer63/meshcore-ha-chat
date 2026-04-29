@@ -76,6 +76,10 @@ export class NodeSummary extends LitElement {
    *  shows these. */
   @property({ type: Number }) fallbackLatitude?: number;
   @property({ type: Number }) fallbackLongitude?: number;
+  /** Unix-seconds timestamp accompanying the fallback location (e.g.,
+   *  Contact.last_advert). Used for the "Updated X ago" line beneath
+   *  the coordinates in the Location hero tile. */
+  @property({ type: Number }) fallbackUpdated?: number;
 
   static styles = css`
     :host { display: block; }
@@ -238,6 +242,11 @@ export class NodeSummary extends LitElement {
       font-family: ui-monospace, 'SF Mono', Menlo, monospace;
       font-size: 13px;
       color: var(--primary-text-color);
+    }
+    .loc-updated {
+      font-size: 11px;
+      color: var(--secondary-text-color);
+      margin-top: 2px;
     }
 
     .dup-annotation {
@@ -659,6 +668,24 @@ export class NodeSummary extends LitElement {
     const hasGps = Number.isFinite(latVal) && Number.isFinite(lonVal)
                    && (latVal !== 0 || lonVal !== 0);
 
+    // "Updated X ago" timestamp resolution:
+    //  - Entity-based location: HA state's `last_updated` (ISO string).
+    //  - Fallback location:    `fallbackUpdated` prop (Unix seconds,
+    //    typically Contact.last_advert).
+    let updatedDate: Date | null = null;
+    if (source === 'entity' && lat) {
+      const iso = this.hass?.states[lat.entity_id]?.last_updated;
+      if (iso) {
+        const d = new Date(iso);
+        if (!Number.isNaN(d.getTime())) updatedDate = d;
+      }
+    } else if (source === 'fallback' && Number.isFinite(this.fallbackUpdated!)) {
+      updatedDate = new Date(this.fallbackUpdated! * 1000);
+    }
+    const updatedText = hasGps && updatedDate
+      ? this._formatRelativeTime(updatedDate)
+      : '';
+
     const onClick = () => {
       if (lat) this._fireMoreInfo(lat.entity_id);
     };
@@ -677,8 +704,22 @@ export class NodeSummary extends LitElement {
               </span>`
             : html`<span class="primary">—</span>`}
         </div>
+        ${updatedText
+          ? html`<div class="loc-updated">Updated ${updatedText}</div>`
+          : nothing}
       </div>
     `;
+  }
+
+  /** Format a Date as a short relative-time string like
+   *  "just now" / "5 min ago" / "2 h ago" / "3 d ago". */
+  private _formatRelativeTime(d: Date): string {
+    const deltaSec = (Date.now() - d.getTime()) / 1000;
+    if (!Number.isFinite(deltaSec) || deltaSec < 0) return 'just now';
+    if (deltaSec < 60)    return 'just now';
+    if (deltaSec < 3600)  return `${Math.floor(deltaSec / 60)} min ago`;
+    if (deltaSec < 86400) return `${Math.floor(deltaSec / 3600)} h ago`;
+    return `${Math.floor(deltaSec / 86400)} d ago`;
   }
 
   private _renderMeshNodeCountTile() {
