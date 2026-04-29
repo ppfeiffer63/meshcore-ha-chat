@@ -130,7 +130,13 @@ export class NodesPage extends LitElement {
 
     /* Active state: translucent category background + saturated text,
        matching the per-card category-badge treatment so the filter
-       reads as the same tag concept. */
+       reads as the same tag concept. Normalize border-left-width back
+       to 1px so the filled active button isn't visibly chunkier on the
+       left than the other three sides (the 3px accent only makes
+       sense as an inactive-state visual cue). */
+    .l1-btn.active {
+      border-left-width: 1px;
+    }
     .l1-btn.active.all,
     .l1-btn.active.added {
       background: rgba(3, 169, 244, 0.15);
@@ -184,6 +190,12 @@ export class NodesPage extends LitElement {
     .l2-btn.repeaters    { border-left: 2px solid rgba(255, 152, 0, 0.5); }
     .l2-btn.room_servers { border-left: 2px solid rgba(156, 39, 176, 0.5); }
     .l2-btn.sensors      { border-left: 2px solid rgba(96, 125, 139, 0.5); }
+
+    /* When active, normalize the left edge back to 1px so the filled
+       button doesn't have a chunkier left border than its other edges. */
+    .l2-btn.active {
+      border-left-width: 1px;
+    }
 
     /* Active L2: same translucent treatment as L1 active and the
        per-card avatar/category-badge. */
