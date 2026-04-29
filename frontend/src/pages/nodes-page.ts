@@ -188,22 +188,22 @@ export class NodesPage extends LitElement {
        glance type identification. */
     .l2-btn.active.clients {
       background: rgba(76, 175, 80, 0.15);
-      color: #2e7d32;
+      color: #388e3c;
       border-color: rgba(76, 175, 80, 0.35);
     }
     .l2-btn.active.repeaters {
       background: rgba(255, 152, 0, 0.15);
-      color: #e65100;
+      color: #f57c00;
       border-color: rgba(255, 152, 0, 0.35);
     }
     .l2-btn.active.room_servers {
       background: rgba(156, 39, 176, 0.15);
-      color: #6a1b9a;
+      color: #7b1fa2;
       border-color: rgba(156, 39, 176, 0.35);
     }
     .l2-btn.active.sensors {
       background: rgba(96, 125, 139, 0.15);
-      color: #37474f;
+      color: #455a64;
       border-color: rgba(96, 125, 139, 0.35);
     }
 

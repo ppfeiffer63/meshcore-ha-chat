@@ -5008,11 +5008,11 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
     /* Translucent backgrounds + saturated icon colour. Mirrors the
        category-badge treatment below so the avatar reads as a tag,
        not a brand-bright disc. */
-    .contact-avatar.client      { background: rgba(76, 175, 80, 0.15);  color: #2e7d32; }
-    .contact-avatar.repeater    { background: rgba(255, 152, 0, 0.15);  color: #e65100; }
-    .contact-avatar.room-server { background: rgba(156, 39, 176, 0.15); color: #6a1b9a; }
-    .contact-avatar.sensor      { background: rgba(96, 125, 139, 0.15); color: #37474f; }
-    .contact-avatar.unknown     { background: rgba(3, 169, 244, 0.15);  color: #0277bd; }
+    .contact-avatar.client      { background: rgba(76, 175, 80, 0.15);  color: #388e3c; }
+    .contact-avatar.repeater    { background: rgba(255, 152, 0, 0.15);  color: #f57c00; }
+    .contact-avatar.room-server { background: rgba(156, 39, 176, 0.15); color: #7b1fa2; }
+    .contact-avatar.sensor      { background: rgba(96, 125, 139, 0.15); color: #455a64; }
+    .contact-avatar.unknown     { background: rgba(3, 169, 244, 0.15);  color: #0288d1; }
 
     .contact-info {
       flex: 1;
@@ -5748,22 +5748,22 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
        glance type identification. */
     .l2-btn.active.clients {
       background: rgba(76, 175, 80, 0.15);
-      color: #2e7d32;
+      color: #388e3c;
       border-color: rgba(76, 175, 80, 0.35);
     }
     .l2-btn.active.repeaters {
       background: rgba(255, 152, 0, 0.15);
-      color: #e65100;
+      color: #f57c00;
       border-color: rgba(255, 152, 0, 0.35);
     }
     .l2-btn.active.room_servers {
       background: rgba(156, 39, 176, 0.15);
-      color: #6a1b9a;
+      color: #7b1fa2;
       border-color: rgba(156, 39, 176, 0.35);
     }
     .l2-btn.active.sensors {
       background: rgba(96, 125, 139, 0.15);
-      color: #37474f;
+      color: #455a64;
       border-color: rgba(96, 125, 139, 0.35);
     }
 

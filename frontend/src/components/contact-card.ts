@@ -47,11 +47,11 @@ export class ContactCard extends LitElement {
     /* Translucent backgrounds + saturated icon colour. Mirrors the
        category-badge treatment below so the avatar reads as a tag,
        not a brand-bright disc. */
-    .contact-avatar.client      { background: rgba(76, 175, 80, 0.15);  color: #2e7d32; }
-    .contact-avatar.repeater    { background: rgba(255, 152, 0, 0.15);  color: #e65100; }
-    .contact-avatar.room-server { background: rgba(156, 39, 176, 0.15); color: #6a1b9a; }
-    .contact-avatar.sensor      { background: rgba(96, 125, 139, 0.15); color: #37474f; }
-    .contact-avatar.unknown     { background: rgba(3, 169, 244, 0.15);  color: #0277bd; }
+    .contact-avatar.client      { background: rgba(76, 175, 80, 0.15);  color: #388e3c; }
+    .contact-avatar.repeater    { background: rgba(255, 152, 0, 0.15);  color: #f57c00; }
+    .contact-avatar.room-server { background: rgba(156, 39, 176, 0.15); color: #7b1fa2; }
+    .contact-avatar.sensor      { background: rgba(96, 125, 139, 0.15); color: #455a64; }
+    .contact-avatar.unknown     { background: rgba(3, 169, 244, 0.15);  color: #0288d1; }
 
     .contact-info {
       flex: 1;
