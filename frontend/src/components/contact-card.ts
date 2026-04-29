@@ -35,14 +35,17 @@ export class ContactCard extends LitElement {
     }
 
     .contact-avatar {
-      width: 44px;
-      height: 44px;
+      width: 32px;
+      height: 32px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
     }
+    /* Scale down the inline 20px SVG icons inside avatars so the
+       glyph reads as a tag-glyph, not a primary visual. */
+    .contact-avatar svg { width: 16px; height: 16px; }
 
     /* Translucent backgrounds + saturated icon colour. Mirrors the
        category-badge treatment below so the avatar reads as a tag,
