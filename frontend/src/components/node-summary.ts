@@ -35,7 +35,6 @@ export type NodeSummaryDevice = ManagedDevice | CompanionDeviceDescriptor;
 type GroupName =
   | 'Radio · live'
   | 'Radio · configuration'
-  | 'Traffic · totals'
   | 'Status'
   | 'Identity';
 
@@ -251,22 +250,25 @@ export class NodeSummary extends LitElement {
       font-weight: 500;
       color: var(--warn, #ff9800);
     }
-    .rate-annotation {
-      font-size: 11px;
-      color: var(--secondary-text-color);
-      margin-top: 2px;
-    }
   `;
 
   // ─── Render ────────────────────────────────────────────────────────────
 
   render() {
     if (!this.hass || !this.device) return nothing;
-    const groups = this._buildGroups();
+
+    // The hero tiles for repeaters consume traffic-totals entities
+    // (nb_sent / sent_flood / sent_direct / nb_recv / recv_flood /
+    // recv_direct / dups / request_succ / request_fail). We share this
+    // Set with _buildGroups so those entities don't double-render as
+    // table rows.
+    const consumed = new Set<string>();
+    const heroTiles = this._renderHeroTiles(consumed);
+    const groups = this._buildGroups(consumed);
 
     return html`
       <div class="hero-row">
-        ${this._renderHeroTiles()}
+        ${heroTiles}
       </div>
 
       <div class="subsection-label">
@@ -285,26 +287,30 @@ export class NodeSummary extends LitElement {
 
   // ─── Hero row variants ────────────────────────────────────────────────
 
-  private _renderHeroTiles(): TemplateResult | typeof nothing {
+  private _renderHeroTiles(consumed: Set<string>): TemplateResult | typeof nothing {
     const dev = this.device!;
     if (dev.type === 'companion') return this._renderCompanionHero();
-    if (dev.type === 'repeater') return this._renderRepeaterHero();
-    return this._renderClientHero();
+    if (dev.type === 'repeater') return this._renderRepeaterHero(consumed);
+    return this._renderClientHero(consumed);
   }
 
-  private _renderRepeaterHero() {
+  private _renderRepeaterHero(consumed: Set<string>) {
     return html`
       ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
       ${this._renderRadioActivityTile()}
+      ${this._renderMessagesSentTile(consumed)}
+      ${this._renderMessagesReceivedTile(consumed)}
+      ${this._renderRequestsTile(consumed)}
       ${this._renderLocationTile()}
     `;
   }
 
-  private _renderClientHero() {
+  private _renderClientHero(consumed: Set<string>) {
     return html`
       ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
+      ${this._renderRequestsTile(consumed)}
       ${this._renderLocationTile()}
     `;
   }
@@ -452,6 +458,186 @@ export class NodeSummary extends LitElement {
     `;
   }
 
+  private _renderMessagesSentTile(consumed: Set<string>) {
+    const nbSent = this._findEntityIdMatching('nb_sent');
+    const sentFlood = this._findEntityIdMatching('sent_flood');
+    const sentDirect = this._findEntityIdMatching('sent_direct');
+    if (!nbSent || (!sentFlood && !sentDirect)) return nothing;
+
+    const totalSent = this._readNumber(nbSent.entity_id);
+    const flood = sentFlood ? this._readNumber(sentFlood.entity_id) : 0;
+    const direct = sentDirect ? this._readNumber(sentDirect.entity_id) : 0;
+    const other = Math.max(0, totalSent - flood - direct);
+    const segs: StackedBarSegment[] = [
+      { value: flood,  label: `Flood ${flood}`,   kind: 'flood' },
+      { value: direct, label: `Direct ${direct}`, kind: 'direct' },
+      { value: other,  label: `Other ${other}`,   kind: 'other' },
+    ];
+    const sentRate = this._readDerivedRate(nbSent.entity_id, 'nb_sent');
+    const rateText = Number.isFinite(sentRate)
+      ? `${sentRate.toFixed(1)} msg/min`
+      : undefined;
+
+    consumed.add(nbSent.entity_id);
+    if (sentFlood) consumed.add(sentFlood.entity_id);
+    if (sentDirect) consumed.add(sentDirect.entity_id);
+
+    return html`
+      <div class="hero-tile" @click=${() => this._fireMoreInfo(nbSent.entity_id)}>
+        <div class="hero-tile-head">
+          <span>Messages Sent${this._renderInfoTip({
+            band: 'info',
+            fillPct: 0,
+            tooltip:
+              'Messages sent (lifetime). Bar segmented by send mode: ' +
+              'Flood (broadcast retransmits visible to all neighbours); ' +
+              'Direct (routed point-to-point along a path); Other (any ' +
+              'sent packet counted in the total but not classified — ' +
+              'typically zero; the firmware design reconciles flood + ' +
+              'direct with nb_sent).',
+          })}</span>
+          <span class="status-dot info"></span>
+        </div>
+        <div class="hero-tile-value">
+          <span class="primary">${this._formatCount(totalSent)}</span>
+        </div>
+        <meshcore-stacked-bar
+          .segments=${segs}
+          .legend=${'inline'}
+          .extraLegendText=${rateText ?? ''}>
+        </meshcore-stacked-bar>
+      </div>
+    `;
+  }
+
+  private _renderMessagesReceivedTile(consumed: Set<string>) {
+    const nbRecv = this._findEntityIdMatching('nb_recv');
+    const recvFlood = this._findEntityIdMatching('recv_flood');
+    const recvDirect = this._findEntityIdMatching('recv_direct');
+    const floodDups = this._findEntityIdMatching('flood_dups');
+    const directDups = this._findEntityIdMatching('direct_dups');
+    if (!nbRecv || (!recvFlood && !recvDirect)) return nothing;
+
+    const totalRecv = this._readNumber(nbRecv.entity_id);
+    const flood = recvFlood ? this._readNumber(recvFlood.entity_id) : 0;
+    const direct = recvDirect ? this._readNumber(recvDirect.entity_id) : 0;
+    const other = Math.max(0, totalRecv - flood - direct);
+    const segs: StackedBarSegment[] = [
+      { value: flood,  label: `Flood ${flood}`,   kind: 'flood' },
+      { value: direct, label: `Direct ${direct}`, kind: 'direct' },
+      { value: other,  label: `Other ${other}`,   kind: 'other' },
+    ];
+
+    const fdups = floodDups ? this._readNumber(floodDups.entity_id) : 0;
+    const ddups = directDups ? this._readNumber(directDups.entity_id) : 0;
+    const totalDups = (Number.isFinite(fdups) ? fdups : 0)
+                    + (Number.isFinite(ddups) ? ddups : 0);
+    const dupRatio = totalRecv > 0 ? (totalDups / totalRecv) * 100 : 0;
+    const dupBand = evaluateSensor('duplicate_ratio', dupRatio).band;
+
+    const recvRate = this._readDerivedRate(nbRecv.entity_id, 'nb_recv');
+    const rateText = Number.isFinite(recvRate)
+      ? `${recvRate.toFixed(1)} msg/min`
+      : undefined;
+
+    consumed.add(nbRecv.entity_id);
+    if (recvFlood) consumed.add(recvFlood.entity_id);
+    if (recvDirect) consumed.add(recvDirect.entity_id);
+    if (floodDups) consumed.add(floodDups.entity_id);
+    if (directDups) consumed.add(directDups.entity_id);
+
+    return html`
+      <div class="hero-tile" @click=${() => this._fireMoreInfo(nbRecv.entity_id)}>
+        <div class="hero-tile-head">
+          <span>Messages Received${this._renderInfoTip({
+            band: 'info',
+            fillPct: 0,
+            tooltip:
+              'Messages received (lifetime). Bar segmented by receive ' +
+              'mode: Flood (broadcast packets received and re-transmitted ' +
+              'on this repeater); Direct (routed packets where this ' +
+              'repeater is on the path). Duplicates are tracked separately ' +
+              'and do NOT contribute to the total — they appear as an ' +
+              'annotation. Dup ratio bands: Green < 5%, Yellow 5–10%, ' +
+              'Red > 10%. High dup rate suggests network loops or path ' +
+              'degradation.',
+          })}</span>
+          <span class="status-dot ${totalDups > 0 ? dupBand : 'info'}"></span>
+        </div>
+        <div class="hero-tile-value">
+          <span class="primary">${this._formatCount(totalRecv)}</span>
+        </div>
+        <meshcore-stacked-bar
+          .segments=${segs}
+          .legend=${'inline'}
+          .extraLegendText=${rateText ?? ''}>
+        </meshcore-stacked-bar>
+        ${totalDups > 0
+          ? html`<div class="dup-annotation">
+              + <span class="num" style="color: var(--${dupBand})">
+                ${totalDups}
+              </span> duplicate${totalDups === 1 ? '' : 's'}
+              (${dupRatio.toFixed(1)}% of recv)
+            </div>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  private _renderRequestsTile(consumed: Set<string>) {
+    const successes = this._findEntityIdMatching('request_succ');
+    const failures = this._findEntityIdMatching('request_fail');
+    if (!successes || !failures) return nothing;
+
+    const sVal = this._readNumber(successes.entity_id);
+    const fVal = this._readNumber(failures.entity_id);
+    const total = sVal + fVal;
+    const rate = total > 0 ? (sVal / total) * 100 : 0;
+    const ev: SensorEval = total >= 50
+      ? evaluateSensor('request_success_rate', rate)
+      : { band: 'info', fillPct: 0, tooltip: '' };
+
+    const tooltip =
+      'Outgoing requests this node initiated (login, telemetry, ' +
+      'neighbour query) and how they resolved. Success rate bands: ' +
+      'Green > 90%, Yellow 70–90%, Red < 70%, with a minimum sample ' +
+      'of 50 attempts to colour. Below the floor, the bar stays ' +
+      'neutral — too few samples to judge.';
+
+    const segs: StackedBarSegment[] = [
+      { value: sVal, label: `OK ${sVal}`,    kind: 'success' },
+      { value: fVal, label: `Fail ${fVal}`, kind: 'failure' },
+    ];
+
+    consumed.add(successes.entity_id);
+    consumed.add(failures.entity_id);
+
+    return html`
+      <div class="hero-tile" @click=${() => this._fireMoreInfo(successes.entity_id)}>
+        <div class="hero-tile-head">
+          <span>Requests${this._renderInfoTip({ ...ev, tooltip })}</span>
+          <span class="status-dot ${ev.band}"></span>
+        </div>
+        <div class="hero-tile-value">
+          <span class="primary">${total > 0 ? `${rate.toFixed(0)}%` : '—'}</span>
+          ${total > 0
+            ? html`<span class="secondary">· ${total} attempt${total === 1 ? '' : 's'}</span>`
+            : nothing}
+        </div>
+        <meshcore-stacked-bar
+          .segments=${segs}
+          .legend=${'inline'}>
+        </meshcore-stacked-bar>
+      </div>
+    `;
+  }
+
+  /** Format an integer count with thousands separators (e.g., 13,807). */
+  private _formatCount(n: number): string {
+    if (!Number.isFinite(n)) return '—';
+    return Math.round(n).toLocaleString();
+  }
+
   private _renderLocationTile() {
     const lat = this._findEntityIdMatching('latitude');
     const lon = this._findEntityIdMatching('longitude');
@@ -524,28 +710,16 @@ export class NodeSummary extends LitElement {
 
   // ─── Sensor table grouping ────────────────────────────────────────────
 
-  private _buildGroups(): { name: GroupName; rows: TemplateResult[] }[] {
-    // Insertion order is the render order. Traffic · totals leads because
-    // the cumulative + composition view is the most actionable summary
-    // for the typical operator question ("is this repeater carrying
-    // traffic?"). Radio · live, configuration, status, identity follow.
+  private _buildGroups(consumed: Set<string>): { name: GroupName; rows: TemplateResult[] }[] {
+    // Insertion order is the render order. Traffic · totals dropped --
+    // Messages Sent / Received / Requests now live in the hero row.
+    // Power group also absent (battery + voltage in hero).
     const groups: Record<GroupName, TemplateResult[]> = {
-      'Traffic · totals': [],
       'Radio · live': [],
       'Radio · configuration': [],
       'Status': [],
       'Identity': [],
     };
-    // Power group is intentionally absent — battery and voltage are
-    // shown in the Battery hero tile (% as primary, voltage as secondary
-    // alongside). Duplicating them as table rows just makes the card
-    // taller without adding information.
-
-    const consumed = new Set<string>();
-
-    // Build composite rows first; they consume their component entities.
-    const trafficRows = this._buildTrafficRows(consumed);
-    if (trafficRows.length) groups['Traffic · totals'].push(...trafficRows);
 
     // No radio composite rows: the windowed TX/RX/Idle composition is
     // already shown in the Radio Activity hero tile. Individual airtime
@@ -631,6 +805,14 @@ export class NodeSummary extends LitElement {
     const ev = info.metricKey ? this._evaluateForRow(info.metricKey, value, info) : null;
     const band = ev?.band ?? 'info';
 
+    // Tooltip resolution: metricKey-derived ev wins; fall back to the
+    // entity's staticTooltip (informational, no band — e.g., Temperature).
+    const tooltipEv: SensorEval | null = ev
+      ? ev
+      : info.staticTooltip
+        ? { band: 'info', fillPct: 0, tooltip: info.staticTooltip }
+        : null;
+
     const formattedValue = this._formatRowValue(info, value, stateObj?.state);
 
     return html`
@@ -643,7 +825,7 @@ export class NodeSummary extends LitElement {
         </td>
         <td class="col-label">
           ${info.label}
-          ${ev ? this._renderInfoTip(ev) : nothing}
+          ${tooltipEv ? this._renderInfoTip(tooltipEv) : nothing}
         </td>
         <td class="col-value">
           ${formattedValue}${unit ? html`<span class="unit">${unit}</span>` : nothing}
@@ -698,168 +880,10 @@ export class NodeSummary extends LitElement {
     return Number.isFinite(n) ? n : NaN;
   }
 
-  // ─── Traffic composite rows ───────────────────────────────────────────
-
-  private _buildTrafficRows(consumed: Set<string>): TemplateResult[] {
-    const rows: TemplateResult[] = [];
-
-    // ─── Sent composition (flood + direct + other) ─────────────────────
-    const nbSent = this._findEntityIdMatching('nb_sent');
-    const sentFlood = this._findEntityIdMatching('sent_flood');
-    const sentDirect = this._findEntityIdMatching('sent_direct');
-
-    if (nbSent && (sentFlood || sentDirect)) {
-      const totalSent = this._readNumber(nbSent.entity_id);
-      const flood = sentFlood ? this._readNumber(sentFlood.entity_id) : 0;
-      const direct = sentDirect ? this._readNumber(sentDirect.entity_id) : 0;
-      const other = Math.max(0, totalSent - flood - direct);
-      const segs: StackedBarSegment[] = [
-        { value: flood,  label: `Flood ${flood}`,   kind: 'flood' },
-        { value: direct, label: `Direct ${direct}`, kind: 'direct' },
-        { value: other,  label: `Other ${other}`,   kind: 'other' },
-      ];
-      const sentRate = this._readDerivedRate(nbSent.entity_id, 'nb_sent');
-      rows.push(this._renderTrafficRow(
-        'Messages sent',
-        totalSent,
-        segs,
-        Number.isFinite(sentRate) ? `${sentRate.toFixed(1)} msg/min` : undefined,
-      ));
-      [nbSent, sentFlood, sentDirect].forEach((e) => e && consumed.add(e.entity_id));
-    }
-
-    // ─── Received composition + duplicate annotation ──────────────────
-    const nbRecv = this._findEntityIdMatching('nb_recv');
-    const recvFlood = this._findEntityIdMatching('recv_flood');
-    const recvDirect = this._findEntityIdMatching('recv_direct');
-    const floodDups = this._findEntityIdMatching('flood_dups');
-    const directDups = this._findEntityIdMatching('direct_dups');
-
-    if (nbRecv && (recvFlood || recvDirect)) {
-      const totalRecv = this._readNumber(nbRecv.entity_id);
-      const flood = recvFlood ? this._readNumber(recvFlood.entity_id) : 0;
-      const direct = recvDirect ? this._readNumber(recvDirect.entity_id) : 0;
-      const other = Math.max(0, totalRecv - flood - direct);
-      const segs: StackedBarSegment[] = [
-        { value: flood,  label: `Flood ${flood}`,   kind: 'flood' },
-        { value: direct, label: `Direct ${direct}`, kind: 'direct' },
-        { value: other,  label: `Other ${other}`,   kind: 'other' },
-      ];
-
-      const fdups = floodDups ? this._readNumber(floodDups.entity_id) : 0;
-      const ddups = directDups ? this._readNumber(directDups.entity_id) : 0;
-      const totalDups = (Number.isFinite(fdups) ? fdups : 0)
-                      + (Number.isFinite(ddups) ? ddups : 0);
-      const dupRatio = totalRecv > 0 ? (totalDups / totalRecv) * 100 : 0;
-      const dupBand = evaluateSensor('duplicate_ratio', dupRatio).band;
-
-      const recvRate = this._readDerivedRate(nbRecv.entity_id, 'nb_recv');
-      const recvRateAnnotation = Number.isFinite(recvRate)
-        ? `${recvRate.toFixed(1)} msg/min`
-        : undefined;
-
-      rows.push(html`
-        <tr class="data-row stacked-row"
-            @click=${() => this._fireMoreInfo(nbRecv.entity_id)}>
-          <td class="col-status">
-            <span class="status-dot info"></span>
-          </td>
-          <td class="col-label">Messages received</td>
-          <td class="col-value">${totalRecv}</td>
-          <td class="col-bar">
-            <meshcore-stacked-bar
-              .segments=${segs}
-              .legend=${'inline'}>
-            </meshcore-stacked-bar>
-            ${recvRateAnnotation
-              ? html`<div class="rate-annotation">${recvRateAnnotation}</div>`
-              : nothing}
-            ${totalDups > 0
-              ? html`<div class="dup-annotation">
-                  + <span class="num" style="color: var(--${dupBand})">
-                    ${totalDups}
-                  </span> duplicate${totalDups === 1 ? '' : 's'}
-                  (${dupRatio.toFixed(1)}% of recv)
-                </div>`
-              : nothing}
-          </td>
-        </tr>
-      `);
-      [nbRecv, recvFlood, recvDirect, floodDups, directDups]
-        .forEach((e) => e && consumed.add(e.entity_id));
-    }
-
-    // ─── Request success / failure ─────────────────────────────────────
-    const successes = this._findEntityIdMatching('request_succ');
-    const failures = this._findEntityIdMatching('request_fail');
-    if (successes && failures) {
-      const sVal = this._readNumber(successes.entity_id);
-      const fVal = this._readNumber(failures.entity_id);
-      const total = sVal + fVal;
-      const rate = total > 0 ? (sVal / total) * 100 : 0;
-      // Caller (us) is responsible for the 50-attempt min-sample floor.
-      const ev = total >= 50
-        ? evaluateSensor('request_success_rate', rate)
-        : { band: 'info' as Band, fillPct: 0, tooltip: 'Insufficient samples (< 50 attempts).' };
-
-      const segs: StackedBarSegment[] = [
-        { value: sVal, label: `${sVal} ok`,    kind: 'success' },
-        { value: fVal, label: `${fVal} fail`, kind: 'failure' },
-      ];
-
-      rows.push(html`
-        <tr class="data-row stacked-row"
-            @click=${() => this._fireMoreInfo(successes.entity_id)}>
-          <td class="col-status">
-            <span class="status-dot ${ev.band}"></span>
-          </td>
-          <td class="col-label">
-            Requests
-            ${this._renderInfoTip(ev as SensorEval)}
-          </td>
-          <td class="col-value">
-            ${total > 0 ? `${rate.toFixed(0)}%` : '—'}
-          </td>
-          <td class="col-bar">
-            <meshcore-stacked-bar
-              .segments=${segs}
-              .legend=${'inline'}>
-            </meshcore-stacked-bar>
-          </td>
-        </tr>
-      `);
-      consumed.add(successes.entity_id);
-      consumed.add(failures.entity_id);
-    }
-
-    return rows;
-  }
-
-  private _renderTrafficRow(
-    label: string,
-    total: number,
-    segments: StackedBarSegment[],
-    rateAnnotation?: string,
-  ) {
-    return html`
-      <tr class="data-row stacked-row">
-        <td class="col-status">
-          <span class="status-dot info"></span>
-        </td>
-        <td class="col-label">${label}</td>
-        <td class="col-value">${Number.isFinite(total) ? total : '—'}</td>
-        <td class="col-bar">
-          <meshcore-stacked-bar
-            .segments=${segments}
-            .legend=${'inline'}>
-          </meshcore-stacked-bar>
-          ${rateAnnotation
-            ? html`<div class="rate-annotation">${rateAnnotation}</div>`
-            : nothing}
-        </td>
-      </tr>
-    `;
-  }
+  // Traffic composite logic moved to the hero tile renderers
+  // (_renderMessagesSentTile / _renderMessagesReceivedTile /
+  // _renderRequestsTile). The Traffic · totals table group is gone --
+  // those rows are now hero tiles.
 
   // ─── Helpers ──────────────────────────────────────────────────────────
 

@@ -51,6 +51,10 @@ export class StackedBar extends LitElement {
   @property({ type: Array }) segments: StackedBarSegment[] = [];
   @property({ type: Number }) total?: number;
   @property({ type: String }) legend: StackedBarLegend = 'below';
+  /** Optional final legend item rendered without a swatch — used by the
+   *  Messages Sent / Received hero tiles to surface the msg/min rate
+   *  next to the segment counts on the same line. */
+  @property({ type: String }) extraLegendText?: string;
 
   static styles = css`
     :host { display: block; width: 100%; }
@@ -152,6 +156,9 @@ export class StackedBar extends LitElement {
               .map(
                 (s) => html`<span><span class="legend-swatch ${s.kind}"></span>${s.label}</span>`,
               )}
+            ${this.extraLegendText
+              ? html`<span class="legend-extra">${this.extraLegendText}</span>`
+              : nothing}
           </div>`
         : nothing}
     `;

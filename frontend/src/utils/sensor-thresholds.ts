@@ -26,7 +26,8 @@ export type MetricKey =
   | 'uptime_hours'
   | 'last_seen_hours'
   | 'request_success_rate'
-  | 'duplicate_ratio';
+  | 'duplicate_ratio'
+  | 'tx_queue_len';
 
 export type Band = 'good' | 'warn' | 'bad' | 'info';
 
@@ -204,6 +205,18 @@ const METRICS: Record<MetricKey, MetricSpec> = {
       'High duplicate ratio suggests routing loops or path degradation ' +
       'where the same packet is reaching this node by multiple paths.',
     // Editorial.
+  },
+
+  tx_queue_len: {
+    displayMin: 0,
+    displayMax: 30,
+    direction: 'lower_better',
+    classify: (v) => (v > 10 ? 'bad' : v > 5 ? 'warn' : 'good'),
+    tooltip:
+      'Number of messages queued for transmission. ' +
+      'Healthy nodes drain the queue quickly. Sustained backlog (> 10) ' +
+      'indicates channel saturation or a stuck transmitter.',
+    // Threshold sourced from the proposal mockup; no published MeshCore band.
   },
 };
 

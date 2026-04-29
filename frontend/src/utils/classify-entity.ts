@@ -34,6 +34,11 @@ export interface EntityInfo {
    *  that don't drive a coloured band (voltage, TX power, temperature,
    *  raw airtime seconds, contacts count, generic catch-all). */
   metricKey?: MetricKey;
+  /** Optional informational tooltip for entities that don't have a
+   *  threshold band but should still surface explanatory text via the
+   *  ⓘ icon (e.g., Temperature -- ambient context-dependent, no band).
+   *  When a metricKey is set, evaluateSensor's tooltip wins. */
+  staticTooltip?: string;
 }
 
 export interface MeshcoreRegistryResult {
@@ -79,6 +84,9 @@ export function classifyEntity(entity: any): EntityInfo | null {
   // appended by upstream's entity registration), so endsWith('_rate')
   // misses them — match the `_rate_` infix instead.
   if (eid.includes('_rate_')) return null;
+  // full_evts is an internal counter (full-buffer events on TX queue) the
+  // user has no actionable signal on -- removed per iter8 review.
+  if (eid.includes('full_evts')) return null;
   if (eid.includes('node_status') || eid.includes('companion_prefix')
       || eid.includes('request_rate') || eid.includes('delivery')
       || eid.includes('path_') || eid.includes('neighbor_')) return null;
@@ -116,7 +124,11 @@ export function classifyEntity(entity: any): EntityInfo | null {
   }
   if (dc === 'temperature' || eid.includes('_temperature')) {
     return { entity_id: eid, label: 'Temperature', icon: 'thermometer',
-             colorScheme: 'neutral', sortOrder: 7 };
+             colorScheme: 'neutral', sortOrder: 7,
+             staticTooltip:
+               'Ambient temperature reported by the node. Informational; ' +
+               'no threshold band -- expected ranges depend heavily on ' +
+               'where the device is mounted.' };
   }
 
   // --- Step 4: entity_id substring fallback (categories without a device_class
@@ -164,10 +176,9 @@ export function classifyEntity(entity: any): EntityInfo | null {
              metricKey: 'noise_floor' };
   }
   if (eid.includes('tx_queue_len')) {
-    // Informational — no published queue-length threshold; a non-zero
-    // value is observable but doesn't always indicate trouble.
     return { entity_id: eid, label: 'TX Queue Length', icon: 'counter',
-             colorScheme: 'neutral', sortOrder: 12 };
+             colorScheme: 'neutral', sortOrder: 12,
+             metricKey: 'tx_queue_len' };
   }
   if (eid.includes('contact_count')) {
     return { entity_id: eid, label: 'Contacts', icon: 'counter',
