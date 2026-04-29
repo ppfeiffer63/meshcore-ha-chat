@@ -38,18 +38,20 @@ export class ContactCard extends LitElement {
       width: 44px;
       height: 44px;
       border-radius: 50%;
-      color: #fff;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
     }
 
-    .contact-avatar.client { background: #4caf50; }
-    .contact-avatar.repeater { background: #ff9800; }
-    .contact-avatar.room-server { background: #9c27b0; }
-    .contact-avatar.sensor { background: #607d8b; }
-    .contact-avatar.unknown { background: var(--primary-color, #03a9f4); }
+    /* Translucent backgrounds + saturated icon colour. Mirrors the
+       category-badge treatment below so the avatar reads as a tag,
+       not a brand-bright disc. */
+    .contact-avatar.client      { background: rgba(76, 175, 80, 0.15);  color: #2e7d32; }
+    .contact-avatar.repeater    { background: rgba(255, 152, 0, 0.15);  color: #e65100; }
+    .contact-avatar.room-server { background: rgba(156, 39, 176, 0.15); color: #6a1b9a; }
+    .contact-avatar.sensor      { background: rgba(96, 125, 139, 0.15); color: #37474f; }
+    .contact-avatar.unknown     { background: rgba(3, 169, 244, 0.15);  color: #0277bd; }
 
     .contact-info {
       flex: 1;

@@ -130,11 +130,23 @@ export class NodesPage extends LitElement {
       color: var(--primary-text-color);
     }
 
-    .l1-btn.active {
-      background: var(--primary-color, #03a9f4);
-      color: #fff;
-      border-color: var(--primary-color, #03a9f4);
-      border-left-color: var(--primary-color, #03a9f4);
+    /* Active state: translucent category background + saturated text,
+       matching the per-card category-badge treatment so the filter
+       reads as the same tag concept. The Discovered button's left-edge
+       accent (set inline from CATEGORY_COLORS) wins over the active
+       background's edge so the green is preserved end-to-end. */
+    .l1-btn.active.all,
+    .l1-btn.active.added {
+      background: rgba(3, 169, 244, 0.15);
+      color: #0277bd;
+      border-color: rgba(3, 169, 244, 0.35);
+      border-left-color: rgba(3, 169, 244, 0.35);
+    }
+    .l1-btn.active.discovered {
+      background: rgba(76, 175, 80, 0.15);
+      color: #2e7d32;
+      border-color: rgba(76, 175, 80, 0.35);
+      border-left-color: rgba(76, 175, 80, 0.35);
     }
 
     .l1-count {
@@ -170,9 +182,29 @@ export class NodesPage extends LitElement {
       color: var(--primary-text-color);
     }
 
-    .l2-btn.active {
-      color: #fff;
-      border-color: transparent;
+    /* Active L2: same translucent treatment as L1 active and the
+       per-card avatar/category-badge. Inactive L2 keeps its narrow
+       category-coloured left-border accent (set inline) for at-a-
+       glance type identification. */
+    .l2-btn.active.clients {
+      background: rgba(76, 175, 80, 0.15);
+      color: #2e7d32;
+      border-color: rgba(76, 175, 80, 0.35);
+    }
+    .l2-btn.active.repeaters {
+      background: rgba(255, 152, 0, 0.15);
+      color: #e65100;
+      border-color: rgba(255, 152, 0, 0.35);
+    }
+    .l2-btn.active.room_servers {
+      background: rgba(156, 39, 176, 0.15);
+      color: #6a1b9a;
+      border-color: rgba(156, 39, 176, 0.35);
+    }
+    .l2-btn.active.sensors {
+      background: rgba(96, 125, 139, 0.15);
+      color: #37474f;
+      border-color: rgba(96, 125, 139, 0.35);
     }
 
     .l2-count {
@@ -459,7 +491,7 @@ export class NodesPage extends LitElement {
   private _renderL1Button(category: PrimaryCategory, label: string) {
     const count = this._l1Counts[category];
     const isActive = this._primaryFilter === category;
-    const classes = `l1-btn ${isActive ? 'active' : ''}`;
+    const classes = `l1-btn ${category} ${isActive ? 'active' : ''}`;
     const accentColor = CATEGORY_COLORS[category];
 
     return html`
@@ -483,8 +515,8 @@ export class NodesPage extends LitElement {
         const color = TYPE_COLORS[t];
         return html`
           <button
-            class=${`l2-btn ${isActive ? 'active' : ''}`}
-            style=${isActive ? `background: ${color}; border-color: ${color};` : `border-left: 2px solid ${color};`}
+            class=${`l2-btn ${t} ${isActive ? 'active' : ''}`}
+            style=${isActive ? '' : `border-left: 2px solid ${color};`}
             @click=${() => this._setTypeFilter(t)}>
             ${TYPE_LABELS[t]} <span class="l2-count">(${this._typeCounts[t]})</span>
           </button>
