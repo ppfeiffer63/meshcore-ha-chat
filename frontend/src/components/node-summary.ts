@@ -295,7 +295,8 @@ export class NodeSummary extends LitElement {
     }
     .dup-annotation .num {
       font-weight: 500;
-      color: var(--warn, #ff9800);
+      color: var(--primary-text-color);
+      font-style: normal;
     }
   `;
 
@@ -594,7 +595,7 @@ export class NodeSummary extends LitElement {
     const totalDups = (Number.isFinite(fdups) ? fdups : 0)
                     + (Number.isFinite(ddups) ? ddups : 0);
     const dupRatio = totalRecv > 0 ? (totalDups / totalRecv) * 100 : 0;
-    const dupBand = evaluateSensor('duplicate_ratio', dupRatio).band;
+    // Dup ratio is informational only -- no banding (see iter14 commit).
 
     const recvRate = this._readDerivedRate(nbRecv.entity_id, 'nb_recv');
     const rateText = Number.isFinite(recvRate)
@@ -623,13 +624,14 @@ export class NodeSummary extends LitElement {
               'firmware version that emits packet types this UI does not ' +
               'yet recognise.\n\n' +
               'Duplicates are tracked separately and do NOT contribute to ' +
-              'the total — they appear as an annotation. Dup ratio bands: ' +
-              'Green < 30%, Yellow 30–60%, Red > 60%. In a flooding mesh ' +
-              'a substantial dup ratio is normal: each active neighbour ' +
-              'retransmits the same flood once, so a 2-neighbour repeater ' +
-              'sees roughly 50%, a 3-neighbour repeater ~67%, etc.',
+              'the total — they appear as an annotation. Dup ratio is ' +
+              'shown for context only, not banded: in a flooding mesh ' +
+              'every active neighbour retransmits the same flood once, so ' +
+              'a 2-neighbour repeater sees roughly 50% dup ratio, a ' +
+              '3-neighbour repeater ~67%, etc. Without knowing the ' +
+              'neighbour count there is no honest threshold to flag.',
           })}</span>
-          <span class="status-dot ${totalDups > 0 ? dupBand : 'info'}"></span>
+          <span class="status-dot info"></span>
         </div>
         <div class="hero-tile-value">
           <span class="primary">${this._formatCount(totalRecv)}</span>
@@ -641,9 +643,8 @@ export class NodeSummary extends LitElement {
         </meshcore-stacked-bar>
         ${totalDups > 0
           ? html`<div class="dup-annotation">
-              + <span class="num" style="color: var(--${dupBand})">
-                ${totalDups}
-              </span> duplicate${totalDups === 1 ? '' : 's'}
+              + <span class="num">${totalDups}</span>
+              duplicate${totalDups === 1 ? '' : 's'}
               (${dupRatio.toFixed(1)}% of recv)
             </div>`
           : nothing}

@@ -189,18 +189,19 @@ describe('evaluateSensor — request_success_rate (editorial)', () => {
   });
 });
 
-describe('evaluateSensor — duplicate_ratio (raised post-iter11: <30 / 30-60 / >60)', () => {
-  // Original Q9 bands (< 5 / 5-10 / > 10) flagged healthy flood-dense
-  // repeaters; raised after a 44.7% dup-ratio repeater-in-good-health
-  // surfaced the false-positive at deploy review.
-  it('10% → good (typical dense-mesh repeater)', () => {
-    expect(evaluateSensor('duplicate_ratio', 10).band).toBe('good');
+describe('evaluateSensor — duplicate_ratio (always-info per iter14)', () => {
+  // Dup ratio scales with neighbour count: a flood-mesh repeater with
+  // N flood-active neighbours expectedly sees ~(N-1)/N duplicates.
+  // Without a neighbour-count divisor there's no honest threshold; the
+  // value renders informationally only.
+  it('10% → info', () => {
+    expect(evaluateSensor('duplicate_ratio', 10).band).toBe('info');
   });
-  it('40% → warn', () => {
-    expect(evaluateSensor('duplicate_ratio', 40).band).toBe('warn');
+  it('50% (typical 2-neighbour repeater) → info', () => {
+    expect(evaluateSensor('duplicate_ratio', 50).band).toBe('info');
   });
-  it('70% → bad', () => {
-    expect(evaluateSensor('duplicate_ratio', 70).band).toBe('bad');
+  it('80% (4-neighbour repeater) → info', () => {
+    expect(evaluateSensor('duplicate_ratio', 80).band).toBe('info');
   });
 });
 

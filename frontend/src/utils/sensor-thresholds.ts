@@ -200,17 +200,17 @@ const METRICS: Record<MetricKey, MetricSpec> = {
     displayMin: 0,
     displayMax: 100,
     direction: 'lower_better',
-    classify: (v) => (v > 60 ? 'bad' : v > 30 ? 'warn' : 'good'),
-    tooltip:
-      'Green < 30%, Yellow 30–60%, Red > 60%. ' +
-      'In a LoRa flooding mesh, every neighbour within range of a flood ' +
-      'retransmits it, so a busy repeater with multiple active neighbours ' +
-      'normally sees a substantial duplicate ratio. Bands set above the ' +
-      'expected dense-mesh range so only genuine outliers (where the ' +
-      'mesh is congested or routing is broken) trigger a warning.',
-    // Editorial — no published MeshCore source. Original < 5 / 5-10 / > 10
-    // bands flagged healthy flood-dense repeaters; raised after deploy
-    // review.
+    // Always-info classify. Dup ratio is fundamentally a function of
+    // neighbour count -- a node with N flood-active neighbours
+    // expectedly sees ~(N-1)/N duplicates because each neighbour
+    // retransmits the flood once. With no neighbour-count divisor
+    // available there's no honest threshold to band against, so the
+    // value renders informationally only. Documented in the deploy-
+    // review research summary (iter13). See:
+    //   https://meshtastic.org/docs/overview/mesh-algo/
+    //   https://github.com/meshcore-dev/MeshCore/blob/main/docs/faq.md
+    classify: () => 'info',
+    tooltip: '',
   },
 
   tx_queue_len: {
