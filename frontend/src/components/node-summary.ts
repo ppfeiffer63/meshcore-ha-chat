@@ -319,17 +319,20 @@ export class NodeSummary extends LitElement {
         ${heroTiles}
       </div>
 
-      <div class="subsection-label">
-        Sensors${this.hiddenCount > 0
-          ? html`<span class="hidden-suffix">(${this.hiddenCount} hidden)</span>`
-          : nothing}
-      </div>
+      ${groups.length > 0
+        ? html`
+          <div class="subsection-label">
+            Sensors${this.hiddenCount > 0
+              ? html`<span class="hidden-suffix">(${this.hiddenCount} hidden)</span>`
+              : nothing}
+          </div>
 
-      <table class="sensor-table">
-        <tbody>
-          ${groups.map((g) => this._renderGroup(g))}
-        </tbody>
-      </table>
+          <table class="sensor-table">
+            <tbody>
+              ${groups.map((g) => this._renderGroup(g))}
+            </tbody>
+          </table>`
+        : nothing}
     `;
   }
 
@@ -832,8 +835,21 @@ export class NodeSummary extends LitElement {
       groups[group].push(this._renderRow(e));
     }
 
+    // Companion devices (Settings tab) don't benefit from the Radio ·
+    // configuration table (frequency / bandwidth / SF / TX power /
+    // rate-limiter are all surfaced elsewhere via the integration's
+    // device-config dialog) or the Identity catch-all. Drop both groups
+    // so the card ends cleanly after the hero row when there's nothing
+    // operationally interesting left to show in the table.
+    const isCompanion = this.device?.type === 'companion';
+    const skipForCompanion: GroupName[] = ['Radio · configuration', 'Identity'];
+
     return (Object.entries(groups) as [GroupName, TemplateResult[]][])
-      .filter(([, rows]) => rows.length > 0)
+      .filter(([name, rows]) => {
+        if (rows.length === 0) return false;
+        if (isCompanion && skipForCompanion.includes(name)) return false;
+        return true;
+      })
       .map(([name, rows]) => ({ name, rows }));
   }
 

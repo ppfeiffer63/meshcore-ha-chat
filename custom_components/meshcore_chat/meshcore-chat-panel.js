@@ -3404,15 +3404,16 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
         ${t}
       </div>
 
-      <div class="subsection-label">
-        Sensors${this.hiddenCount>0?j`<span class="hidden-suffix">(${this.hiddenCount} hidden)</span>`:G}
-      </div>
+      ${i.length>0?j`
+          <div class="subsection-label">
+            Sensors${this.hiddenCount>0?j`<span class="hidden-suffix">(${this.hiddenCount} hidden)</span>`:G}
+          </div>
 
-      <table class="sensor-table">
-        <tbody>
-          ${i.map(e=>this._renderGroup(e))}
-        </tbody>
-      </table>
+          <table class="sensor-table">
+            <tbody>
+              ${i.map(e=>this._renderGroup(e))}
+            </tbody>
+          </table>`:G}
     `}_renderHeroTiles(e){const t=this.device;return"companion"===t.type?this._renderCompanionHero():"repeater"===t.type?this._renderRepeaterHero(e):this._renderClientHero(e)}_renderRepeaterHero(e){return j`
       ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
@@ -3578,7 +3579,7 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
           <span class="primary" style="font-size:16px;">USB / mains</span>
         </div>
       </div>
-    `}_buildGroups(e){const t={"Radio · live":[],"Radio · configuration":[],Status:[],Identity:[]};for(const i of this.entities)e.has(i.entity_id)||this._isHeroDuplicate(i)||t[this._groupOf(i)].push(this._renderRow(i));return Object.entries(t).filter(([,e])=>e.length>0).map(([e,t])=>({name:e,rows:t}))}_isHeroDuplicate(e){return"battery_pct"===e.metricKey||2===e.sortOrder||"snr"===e.metricKey||"rssi"===e.metricKey||"uptime_hours"===e.metricKey||"tx_airtime_util"===e.metricKey||"rx_airtime_util"===e.metricKey||"Airtime"===e.label||"RX Airtime"===e.label}_groupOf(e){const t=e.entity_id,i=e.sortOrder;return 2===i?"Status":6===i?"Radio · configuration":4===i||5===i||9===i||10===i||11===i||12===i||t.includes("noise_floor")||t.includes("tx_queue")?"Radio · live":t.includes("frequency")||t.includes("bandwidth")||t.includes("spreading_factor")||t.includes("rate_limiter")?"Radio · configuration":t.includes("hop_count")||t.includes("out_path")||t.includes("last_seen")||t.includes("last_advert")||3===i||8===i||7===i?"Status":"Identity"}_renderGroup(e){return j`
+    `}_buildGroups(e){const t={"Radio · live":[],"Radio · configuration":[],Status:[],Identity:[]};for(const i of this.entities)e.has(i.entity_id)||this._isHeroDuplicate(i)||t[this._groupOf(i)].push(this._renderRow(i));const i="companion"===this.device?.type,o=["Radio · configuration","Identity"];return Object.entries(t).filter(([e,t])=>!(0===t.length||i&&o.includes(e))).map(([e,t])=>({name:e,rows:t}))}_isHeroDuplicate(e){return"battery_pct"===e.metricKey||2===e.sortOrder||"snr"===e.metricKey||"rssi"===e.metricKey||"uptime_hours"===e.metricKey||"tx_airtime_util"===e.metricKey||"rx_airtime_util"===e.metricKey||"Airtime"===e.label||"RX Airtime"===e.label}_groupOf(e){const t=e.entity_id,i=e.sortOrder;return 2===i?"Status":6===i?"Radio · configuration":4===i||5===i||9===i||10===i||11===i||12===i||t.includes("noise_floor")||t.includes("tx_queue")?"Radio · live":t.includes("frequency")||t.includes("bandwidth")||t.includes("spreading_factor")||t.includes("rate_limiter")?"Radio · configuration":t.includes("hop_count")||t.includes("out_path")||t.includes("last_seen")||t.includes("last_advert")||3===i||8===i||7===i?"Status":"Identity"}_renderGroup(e){return j`
       <tr class="group-row"><td colspan="4">${e.name}</td></tr>
       ${e.rows}
     `}_renderRow(e){const t=this._readNumber(e.entity_id),i=this.hass?.states[e.entity_id],o=i?.attributes?.unit_of_measurement??"",r=e.metricKey?this._evaluateForRow(e.metricKey,t,e):null,a=r?.band??"info",s=e.staticTooltip||r?.tooltip||"",n=s?{band:a,fillPct:r?.fillPct??0,tooltip:s,source:r?.source}:null,d=this._formatRowValue(e,t,i?.state);return j`
