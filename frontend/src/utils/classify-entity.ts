@@ -125,6 +125,7 @@ export function classifyEntity(entity: any): EntityInfo | null {
   if (dc === 'temperature' || eid.includes('_temperature')) {
     return { entity_id: eid, label: 'Temperature', icon: 'thermometer',
              colorScheme: 'neutral', sortOrder: 7,
+             metricKey: 'temperature',
              staticTooltip:
                'Ambient temperature reported by the node. Informational; ' +
                'no threshold band -- expected ranges depend heavily on ' +

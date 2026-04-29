@@ -27,7 +27,8 @@ export type MetricKey =
   | 'last_seen_hours'
   | 'request_success_rate'
   | 'duplicate_ratio'
-  | 'tx_queue_len';
+  | 'tx_queue_len'
+  | 'temperature';
 
 export type Band = 'good' | 'warn' | 'bad' | 'info';
 
@@ -217,6 +218,21 @@ const METRICS: Record<MetricKey, MetricSpec> = {
       'Healthy nodes drain the queue quickly. Sustained backlog (> 10) ' +
       'indicates channel saturation or a stuck transmitter.',
     // Threshold sourced from the proposal mockup; no published MeshCore band.
+  },
+
+  temperature: {
+    // Range chosen to accommodate either Fahrenheit or Celsius readings
+    // without per-unit branching. 0–120 maps:
+    //   °F: 73 → 61% fill (warm room), 105 → 87% (extreme heat)
+    //   °C: 25 → 21% fill (warm room), 45 → 38% (extreme heat)
+    // Always-info classify — ambient temperature has no universal good/
+    // bad threshold; bar is informational placement, not a health signal.
+    displayMin: 0,
+    displayMax: 120,
+    direction: 'higher_better',
+    classify: () => 'info',
+    tooltip: '',
+    // No source — informational only.
   },
 };
 

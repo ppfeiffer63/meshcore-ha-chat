@@ -805,13 +805,18 @@ export class NodeSummary extends LitElement {
     const ev = info.metricKey ? this._evaluateForRow(info.metricKey, value, info) : null;
     const band = ev?.band ?? 'info';
 
-    // Tooltip resolution: metricKey-derived ev wins; fall back to the
-    // entity's staticTooltip (informational, no band — e.g., Temperature).
-    const tooltipEv: SensorEval | null = ev
-      ? ev
-      : info.staticTooltip
-        ? { band: 'info', fillPct: 0, tooltip: info.staticTooltip }
-        : null;
+    // Tooltip resolution: staticTooltip wins when set (lets entities like
+    // Temperature carry a metricKey for the bar AND a custom tooltip).
+    // Otherwise fall back to the metric-derived tooltip.
+    const tooltipText = info.staticTooltip || ev?.tooltip || '';
+    const tooltipEv: SensorEval | null = tooltipText
+      ? {
+          band,
+          fillPct: ev?.fillPct ?? 0,
+          tooltip: tooltipText,
+          source: ev?.source,
+        }
+      : null;
 
     const formattedValue = this._formatRowValue(info, value, stateObj?.state);
 
