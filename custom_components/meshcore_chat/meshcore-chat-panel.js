@@ -3212,7 +3212,7 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
     .unavailable {
       opacity: 0.5;
     }
-  `,e([ge({type:Object})],Ge.prototype,"hass",void 0),e([ge({type:String})],Ge.prototype,"entityId",void 0),e([ge({type:String})],Ge.prototype,"label",void 0),e([ge({type:String})],Ge.prototype,"icon",void 0),e([ge({type:String})],Ge.prototype,"colorScheme",void 0),Ge=e([pe("meshcore-sensor-tile")],Ge);const We={battery_pct:{displayMin:0,displayMax:100,direction:"higher_better",classify:e=>e<20?"bad":e<50?"warn":"good",tooltip:"Green ≥ 50%, Yellow 20–50%, Red < 20% (critical < 10%). Home Assistant low-battery convention.",source:"https://community.home-assistant.io/t/low-battery-level-detection-notification-for-all-battery-sensors/258664"},rssi:{displayMin:-130,displayMax:-30,direction:"higher_better",classify:e=>e<-115?"bad":e<-100?"warn":"good",tooltip:"Green > −100 dBm, Yellow −100 to −115 dBm, Red < −115 dBm. Lower (more negative) RSSI means a weaker received signal.",source:"https://www.thethingsnetwork.org/docs/lorawan/rssi-and-snr/"},snr:{displayMin:-20,displayMax:20,direction:"higher_better",classify:e=>e<-7?"bad":e<0?"warn":"good",tooltip:"Green > 0 dB, Yellow −7 to 0 dB, Red < −7 dB. Demodulation floor is spreading-factor dependent (Semtech AN1200.13).",source:"https://www.openhacks.com/uploadsproductos/loradesignguide_std.pdf"},noise_floor:{displayMin:-130,displayMax:-90,direction:"lower_better",classify:e=>e>-105?"bad":e>-115?"warn":"good",tooltip:"Green < −115 dBm, Yellow −115 to −105 dBm, Red > −105 dBm. Above −105 dBm typically indicates man-made RF interference, not thermal noise.",source:"https://www.openhacks.com/uploadsproductos/loradesignguide_std.pdf"},tx_airtime_util:{displayMin:0,displayMax:20,direction:"lower_better",classify:e=>e>10?"bad":e>2?"warn":"good",tooltip:"Green < 2%, Yellow 2–10%, Red > 10%. EU868 sub-band 1% / general 10% duty-cycle ceiling (ETSI EN 300 220-2; eCFR 47 CFR 15.247).",source:"https://www.etsi.org/deliver/etsi_en/300200_300299/30022002/03.03.01_60/en_30022002v030301p.pdf"},rx_airtime_util:{displayMin:0,displayMax:100,direction:"lower_better",classify:e=>e>50?"bad":e>25?"warn":"good",tooltip:"Green < 25%, Yellow 25–50%, Red > 50%. High RX utilisation usually means heavy mesh traffic or environmental interference saturating the receiver."},channel_util:{displayMin:0,displayMax:100,direction:"lower_better",classify:e=>e>50?"bad":e>25?"warn":"good",tooltip:"Green < 25%, Yellow 25–50%, Red > 50%. Channel utilisation aggregates all activity on the radio channel."},hop_count:{displayMin:0,displayMax:32,direction:"lower_better",classify:e=>e>=16?"bad":e>=7?"warn":"good",tooltip:"Green ≤ 6, Yellow 7–15, Red ≥ 16. MeshCore allows up to 64 hops; community-recommended meshes run well under 32. Each hop adds airtime cost and latency.",source:"https://nodakmesh.org/blog/meshcore-path-hash-explained"},uptime_hours:{displayMin:0,displayMax:168,direction:"higher_better",classify:e=>e<1?"bad":e<24?"warn":"good",tooltip:"Green > 24 h, Yellow 1–24 h, Red < 1 h. Very recent reboot suggests a watchdog reset or brownout."},last_seen_hours:{displayMin:0,displayMax:6,direction:"lower_better",classify:e=>e>4?"bad":e>2?"warn":"good",tooltip:"Green < 2 h, Yellow 2–4 h, Red > 4 h. Should be tuned to the node’s advertising interval; nodes that advertise hourly should appear far more often than nodes that advertise every 6 hours."},request_success_rate:{displayMin:0,displayMax:100,direction:"higher_better",classify:e=>e<70?"bad":e<90?"warn":"good",tooltip:'Green > 90%, Yellow 70–90%, Red < 70%. Caller is responsible for the min-sample floor — bars should render with band="info" until at least 50 attempts have accumulated.'},duplicate_ratio:{displayMin:0,displayMax:30,direction:"lower_better",classify:e=>e>10?"bad":e>5?"warn":"good",tooltip:"Green < 5%, Yellow 5–10%, Red > 10%. High duplicate ratio suggests routing loops or path degradation where the same packet is reaching this node by multiple paths."},tx_queue_len:{displayMin:0,displayMax:30,direction:"lower_better",classify:e=>e>10?"bad":e>5?"warn":"good",tooltip:"Number of messages queued for transmission. Healthy nodes drain the queue quickly. Sustained backlog (> 10) indicates channel saturation or a stuck transmitter."},temperature:{displayMin:0,displayMax:120,direction:"higher_better",classify:()=>"info",tooltip:""}};function Xe(e,t){const i=t.displayMax-t.displayMin;if(i<=0)return 0;const o=(e-t.displayMin)/i,r="higher_better"===t.direction?o:1-o;return Math.max(0,Math.min(100,100*r))}function Ye(e,t){if(!Number.isFinite(t))return{band:"info",fillPct:0,tooltip:""};const i=We[e];return i?{band:i.classify(t),fillPct:Xe(t,i),tooltip:i.tooltip,source:i.source}:{band:"info",fillPct:0,tooltip:""}}let Qe=class extends ce{constructor(){super(...arguments),this.value=0,this.min=0,this.max=100,this.band="info"}render(){const e=this.max-this.min;let t=0;return Number.isFinite(this.value)&&e>0&&(t=(this.value-this.min)/e*100,t=Math.max(0,Math.min(100,t))),j`
+  `,e([ge({type:Object})],Ge.prototype,"hass",void 0),e([ge({type:String})],Ge.prototype,"entityId",void 0),e([ge({type:String})],Ge.prototype,"label",void 0),e([ge({type:String})],Ge.prototype,"icon",void 0),e([ge({type:String})],Ge.prototype,"colorScheme",void 0),Ge=e([pe("meshcore-sensor-tile")],Ge);const We={battery_pct:{displayMin:0,displayMax:100,direction:"higher_better",classify:e=>e<20?"bad":e<50?"warn":"good",tooltip:"Green ≥ 50%, Yellow 20–50%, Red < 20% (critical < 10%). Home Assistant low-battery convention.",source:"https://community.home-assistant.io/t/low-battery-level-detection-notification-for-all-battery-sensors/258664"},rssi:{displayMin:-130,displayMax:-30,direction:"higher_better",classify:e=>e<-115?"bad":e<-100?"warn":"good",tooltip:"Green > −100 dBm, Yellow −100 to −115 dBm, Red < −115 dBm. Lower (more negative) RSSI means a weaker received signal.",source:"https://www.thethingsnetwork.org/docs/lorawan/rssi-and-snr/"},snr:{displayMin:-20,displayMax:20,direction:"higher_better",classify:e=>e<-7?"bad":e<0?"warn":"good",tooltip:"Green > 0 dB, Yellow −7 to 0 dB, Red < −7 dB. Demodulation floor is spreading-factor dependent (Semtech AN1200.13).",source:"https://www.openhacks.com/uploadsproductos/loradesignguide_std.pdf"},noise_floor:{displayMin:-130,displayMax:-90,direction:"lower_better",classify:e=>e>-105?"bad":e>-115?"warn":"good",tooltip:"Green < −115 dBm, Yellow −115 to −105 dBm, Red > −105 dBm. Above −105 dBm typically indicates man-made RF interference, not thermal noise.",source:"https://www.openhacks.com/uploadsproductos/loradesignguide_std.pdf"},tx_airtime_util:{displayMin:0,displayMax:20,direction:"lower_better",classify:e=>e>10?"bad":e>2?"warn":"good",tooltip:"Green < 2%, Yellow 2–10%, Red > 10%. EU868 sub-band 1% / general 10% duty-cycle ceiling (ETSI EN 300 220-2; eCFR 47 CFR 15.247).",source:"https://www.etsi.org/deliver/etsi_en/300200_300299/30022002/03.03.01_60/en_30022002v030301p.pdf"},rx_airtime_util:{displayMin:0,displayMax:100,direction:"lower_better",classify:e=>e>50?"bad":e>25?"warn":"good",tooltip:"Green < 25%, Yellow 25–50%, Red > 50%. High RX utilisation usually means heavy mesh traffic or environmental interference saturating the receiver."},channel_util:{displayMin:0,displayMax:100,direction:"lower_better",classify:e=>e>50?"bad":e>25?"warn":"good",tooltip:"Green < 25%, Yellow 25–50%, Red > 50%. Channel utilisation aggregates all activity on the radio channel."},hop_count:{displayMin:0,displayMax:32,direction:"lower_better",classify:e=>e>=16?"bad":e>=7?"warn":"good",tooltip:"Green ≤ 6, Yellow 7–15, Red ≥ 16. MeshCore allows up to 64 hops; community-recommended meshes run well under 32. Each hop adds airtime cost and latency.",source:"https://nodakmesh.org/blog/meshcore-path-hash-explained"},uptime_hours:{displayMin:0,displayMax:168,direction:"higher_better",classify:e=>e<1?"bad":e<24?"warn":"good",tooltip:"Green > 24 h, Yellow 1–24 h, Red < 1 h. Very recent reboot suggests a watchdog reset or brownout."},last_seen_hours:{displayMin:0,displayMax:6,direction:"lower_better",classify:e=>e>4?"bad":e>2?"warn":"good",tooltip:"Green < 2 h, Yellow 2–4 h, Red > 4 h. Should be tuned to the node’s advertising interval; nodes that advertise hourly should appear far more often than nodes that advertise every 6 hours."},request_success_rate:{displayMin:0,displayMax:100,direction:"higher_better",classify:e=>e<70?"bad":e<90?"warn":"good",tooltip:'Green > 90%, Yellow 70–90%, Red < 70%. Caller is responsible for the min-sample floor — bars should render with band="info" until at least 50 attempts have accumulated.'},duplicate_ratio:{displayMin:0,displayMax:30,direction:"lower_better",classify:e=>e>10?"bad":e>5?"warn":"good",tooltip:"Green < 5%, Yellow 5–10%, Red > 10%. High duplicate ratio suggests routing loops or path degradation where the same packet is reaching this node by multiple paths."},tx_queue_len:{displayMin:0,displayMax:30,direction:"lower_better",classify:e=>e>10?"bad":e>5?"warn":"good",tooltip:"Number of messages queued for transmission. Healthy nodes drain the queue quickly. Sustained backlog (> 10) indicates channel saturation or a stuck transmitter."},temperature:{displayMin:-20,displayMax:140,direction:"higher_better",classify:e=>e<0||e>125?"bad":"good",tooltip:"Red below 0°F (≈ −18°C) or above 125°F (≈ 52°C); green otherwise. Extreme ambient temperatures risk damage to the radio, battery, or enclosure."}};function Xe(e,t){const i=t.displayMax-t.displayMin;if(i<=0)return 0;const o=(e-t.displayMin)/i,r="higher_better"===t.direction?o:1-o;return Math.max(0,Math.min(100,100*r))}function Ye(e,t){if(!Number.isFinite(t))return{band:"info",fillPct:0,tooltip:""};const i=We[e];return i?{band:i.classify(t),fillPct:Xe(t,i),tooltip:i.tooltip,source:i.source}:{band:"info",fillPct:0,tooltip:""}}let Qe=class extends ce{constructor(){super(...arguments),this.value=0,this.min=0,this.max=100,this.band="info"}render(){const e=this.max-this.min;let t=0;return Number.isFinite(this.value)&&e>0&&(t=(this.value-this.min)/e*100,t=Math.max(0,Math.min(100,t))),j`
       <div class="stat-bar"
            role="progressbar"
            aria-valuenow="${this.value}"
@@ -3468,7 +3468,7 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
           .band=${r.band}>
         </meshcore-stat-bar>
       </div>
-    `}_renderRadioActivityTile(){const e=this._findByMetric("tx_airtime_util"),t=this._findByMetric("rx_airtime_util");if(!e&&!t)return G;const i=e?this._readNumber(e.entity_id):0,o=t?this._readNumber(t.entity_id):0,r=Number.isFinite(i)?Math.max(0,i):0,a=Number.isFinite(o)?Math.max(0,o):0,s=Math.max(0,100-r-a),n=Ye("tx_airtime_util",r).band,d=Ye("rx_airtime_util",a).band,c=this._worseBand(n,d),l=[{value:r,label:`TX ${r.toFixed(1)}%`,kind:"tx"},{value:a,label:`RX ${a.toFixed(1)}%`,kind:"rx"},{value:s,label:`Idle ${s.toFixed(1)}%`,kind:"idle"}];return j`
+    `}_renderRadioActivityTile(){const e=this._findByMetric("tx_airtime_util"),t=this._findByMetric("rx_airtime_util");if(!e&&!t)return G;const i=e?this._readNumber(e.entity_id):0,o=t?this._readNumber(t.entity_id):0,r=Number.isFinite(i)?Math.max(0,i):0,a=Number.isFinite(o)?Math.max(0,o):0,s=Math.max(0,100-r-a),n=Ye("tx_airtime_util",r).band,d=Ye("rx_airtime_util",a).band,c=this._worseBand(n,d),l=[{value:r,label:`TX ${r.toFixed(1)}%`,kind:"tx"},{value:a,label:`RX ${a.toFixed(1)}%`,kind:"rx"},{value:s,label:`Idle ${s.toFixed(1)}%`,kind:"idle"}],p=r+a;return j`
       <div class="hero-tile"
            @click=${()=>e&&this._fireMoreInfo(e.entity_id)}>
         <div class="hero-tile-head">
@@ -3476,20 +3476,28 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
           <span class="status-dot ${c}"></span>
         </div>
         <div class="hero-tile-value">
-          <span class="compact">
-            ${e?j`<span class="ra-segment" @click=${t=>{t.stopPropagation(),e&&this._fireMoreInfo(e.entity_id)}}
-                  >TX ${r.toFixed(1)}%</span>`:j`<span>TX ${r.toFixed(1)}%</span>`}
-            ·
-            ${t?j`<span class="ra-segment" @click=${e=>{e.stopPropagation(),t&&this._fireMoreInfo(t.entity_id)}}
-                  >RX ${a.toFixed(1)}%</span>`:j`<span>RX ${a.toFixed(1)}%</span>`}
-            · Idle ${s.toFixed(1)}%
-          </span>
+          <span class="primary">${p.toFixed(1)}<span class="unit">%</span></span>
         </div>
         <meshcore-stacked-bar
           .segments=${l}
           .total=${100}
           .legend=${"none"}>
         </meshcore-stacked-bar>
+        <div class="ra-legend">
+          ${e?j`<span class="ra-legend-item" @click=${t=>{t.stopPropagation(),e&&this._fireMoreInfo(e.entity_id)}}>
+                <span class="legend-swatch tx"></span>TX ${r.toFixed(1)}%
+              </span>`:j`<span class="ra-legend-item">
+                <span class="legend-swatch tx"></span>TX ${r.toFixed(1)}%
+              </span>`}
+          ${t?j`<span class="ra-legend-item" @click=${e=>{e.stopPropagation(),t&&this._fireMoreInfo(t.entity_id)}}>
+                <span class="legend-swatch rx"></span>RX ${a.toFixed(1)}%
+              </span>`:j`<span class="ra-legend-item">
+                <span class="legend-swatch rx"></span>RX ${a.toFixed(1)}%
+              </span>`}
+          <span class="ra-legend-item">
+            <span class="legend-swatch idle"></span>Idle ${s.toFixed(1)}%
+          </span>
+        </div>
       </div>
     `}_renderMessagesSentTile(e){const t=this._findEntityIdMatching("nb_sent"),i=this._findEntityIdMatching("sent_flood"),o=this._findEntityIdMatching("sent_direct");if(!t||!i&&!o)return G;const r=this._readNumber(t.entity_id),a=i?this._readNumber(i.entity_id):0,s=o?this._readNumber(o.entity_id):0,n=Math.max(0,r-a-s),d=[{value:a,label:`Flood ${a}`,kind:"flood"},{value:s,label:`Direct ${s}`,kind:"direct"},{value:n,label:`Other ${n}`,kind:"other"}],c=this._readDerivedRate(t.entity_id,"nb_sent"),l=Number.isFinite(c)?`${c.toFixed(1)} msg/min`:void 0;return e.add(t.entity_id),i&&e.add(i.entity_id),o&&e.add(o.entity_id),j`
       <div class="hero-tile" @click=${()=>this._fireMoreInfo(t.entity_id)}>
@@ -3596,7 +3604,7 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
               </meshcore-stat-bar>`:G}
         </td>
       </tr>
-    `}_evaluateForRow(e,t,i){if("uptime_hours"===e){let o=t;switch(this.hass?.states[i.entity_id]?.attributes?.unit_of_measurement??""){case"d":o=24*t;break;case"h":o=t;break;case"min":o=t/60;break;default:o=t/3600}return Ye(e,o)}return Ye(e,t)}_readDerivedRate(e,t){const i=e.replace(`_${t}_`,`_${t}_rate_`);if(!this.hass?.states[i])return NaN;const o=this.hass.states[i].state;if("unavailable"===o||"unknown"===o)return NaN;const r=parseFloat(o);return Number.isFinite(r)?r:NaN}_findByMetric(e){return this.entities.find(t=>t.metricKey===e)}_findEntityIdMatching(e){return this.entities.find(t=>t.entity_id.includes(e))}_findEntityByLabel(e){return this.entities.find(t=>t.label===e)}_readNumber(e){const t=this.hass?.states[e];if(!t||"unavailable"===t.state||"unknown"===t.state)return NaN;const i=parseFloat(t.state);return Number.isFinite(i)?i:NaN}_formatNumber(e,t){return Number.isFinite(e)?e.toFixed(t):"—"}_formatRowValue(e,t,i){if("unavailable"===i||"unknown"===i)return"—";if(!Number.isFinite(t))return i??"—";const o=this.hass?.entities?.[e.entity_id]?.display_precision;return null!=o&&o>=0?t.toFixed(o):i&&i.includes(".")?i:t.toString()}_renderInfoTip(e){return e.tooltip?j`<meshcore-info-tip
+    `}_evaluateForRow(e,t,i){if("uptime_hours"===e){let o=t;switch(this.hass?.states[i.entity_id]?.attributes?.unit_of_measurement??""){case"d":o=24*t;break;case"h":o=t;break;case"min":o=t/60;break;default:o=t/3600}return Ye(e,o)}return Ye(e,"temperature"===e&&(this.hass?.states[i.entity_id]?.attributes?.unit_of_measurement??"").includes("C")?9*t/5+32:t)}_readDerivedRate(e,t){const i=e.replace(`_${t}_`,`_${t}_rate_`);if(!this.hass?.states[i])return NaN;const o=this.hass.states[i].state;if("unavailable"===o||"unknown"===o)return NaN;const r=parseFloat(o);return Number.isFinite(r)?r:NaN}_findByMetric(e){return this.entities.find(t=>t.metricKey===e)}_findEntityIdMatching(e){return this.entities.find(t=>t.entity_id.includes(e))}_findEntityByLabel(e){return this.entities.find(t=>t.label===e)}_readNumber(e){const t=this.hass?.states[e];if(!t||"unavailable"===t.state||"unknown"===t.state)return NaN;const i=parseFloat(t.state);return Number.isFinite(i)?i:NaN}_formatNumber(e,t){return Number.isFinite(e)?e.toFixed(t):"—"}_formatRowValue(e,t,i){if("unavailable"===i||"unknown"===i)return"—";if(!Number.isFinite(t))return i??"—";const o=this.hass?.entities?.[e.entity_id]?.display_precision;return null!=o&&o>=0?t.toFixed(o):i&&i.includes(".")?i:t.toString()}_renderInfoTip(e){return e.tooltip?j`<meshcore-info-tip
       .content=${e.tooltip}
       .source=${e.source??""}>
     </meshcore-info-tip>`:G}_worseBand(e,t){const i={good:0,info:0,warn:1,bad:2};return i[e]>=i[t]?e:t}_fireMoreInfo(e){e&&this.dispatchEvent(new CustomEvent("hass-more-info",{detail:{entityId:e},bubbles:!0,composed:!0}))}_fireContextMenu(e,t){e?.preventDefault(),this.dispatchEvent(new CustomEvent("tile-context-menu",{detail:{entityId:t.entity_id,label:t.label},bubbles:!0,composed:!0}))}};et.styles=s`
@@ -3661,6 +3669,39 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
     }
     .ra-segment:hover {
       background: rgba(127, 127, 127, 0.18);
+    }
+
+    /* Radio activity legend (matches the stacked-bar inline legend
+       layout used by Messages Sent / Received) */
+    .ra-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--secondary-text-color);
+    }
+    .ra-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+    .ra-legend-item:hover {
+      color: var(--primary-text-color);
+      cursor: pointer;
+    }
+    .legend-swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .legend-swatch.tx   { background: var(--info, #2196f3); }
+    .legend-swatch.rx   { background: var(--good, #4caf50); }
+    .legend-swatch.idle {
+      background: var(--divider-color, #e0e0e0);
+      border: 1px solid var(--secondary-text-color);
     }
 
     /* ─── Status dots ─── */

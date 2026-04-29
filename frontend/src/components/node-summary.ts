@@ -145,6 +145,39 @@ export class NodeSummary extends LitElement {
       background: rgba(127, 127, 127, 0.18);
     }
 
+    /* Radio activity legend (matches the stacked-bar inline legend
+       layout used by Messages Sent / Received) */
+    .ra-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--secondary-text-color);
+    }
+    .ra-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+    .ra-legend-item:hover {
+      color: var(--primary-text-color);
+      cursor: pointer;
+    }
+    .legend-swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .legend-swatch.tx   { background: var(--info, #2196f3); }
+    .legend-swatch.rx   { background: var(--good, #4caf50); }
+    .legend-swatch.idle {
+      background: var(--divider-color, #e0e0e0);
+      border: 1px solid var(--secondary-text-color);
+    }
+
     /* ─── Status dots ─── */
     .status-dot {
       width: 8px;
@@ -430,6 +463,8 @@ export class NodeSummary extends LitElement {
       if (rx) this._fireMoreInfo(rx.entity_id);
     };
 
+    const totalUsed = txN + rxN;
+
     return html`
       <div class="hero-tile"
            @click=${() => tx && this._fireMoreInfo(tx.entity_id)}>
@@ -445,24 +480,32 @@ export class NodeSummary extends LitElement {
           <span class="status-dot ${dotBand}"></span>
         </div>
         <div class="hero-tile-value">
-          <span class="compact">
-            ${tx
-              ? html`<span class="ra-segment" @click=${onTxClick}
-                  >TX ${txN.toFixed(1)}%</span>`
-              : html`<span>TX ${txN.toFixed(1)}%</span>`}
-            ·
-            ${rx
-              ? html`<span class="ra-segment" @click=${onRxClick}
-                  >RX ${rxN.toFixed(1)}%</span>`
-              : html`<span>RX ${rxN.toFixed(1)}%</span>`}
-            · Idle ${idleN.toFixed(1)}%
-          </span>
+          <span class="primary">${totalUsed.toFixed(1)}<span class="unit">%</span></span>
         </div>
         <meshcore-stacked-bar
           .segments=${segments}
           .total=${100}
           .legend=${'none'}>
         </meshcore-stacked-bar>
+        <div class="ra-legend">
+          ${tx
+            ? html`<span class="ra-legend-item" @click=${onTxClick}>
+                <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
+              </span>`
+            : html`<span class="ra-legend-item">
+                <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
+              </span>`}
+          ${rx
+            ? html`<span class="ra-legend-item" @click=${onRxClick}>
+                <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
+              </span>`
+            : html`<span class="ra-legend-item">
+                <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
+              </span>`}
+          <span class="ra-legend-item">
+            <span class="legend-swatch idle"></span>Idle ${idleN.toFixed(1)}%
+          </span>
+        </div>
       </div>
     `;
   }
@@ -907,6 +950,15 @@ export class NodeSummary extends LitElement {
         default:    hours = raw / 3600; break;
       }
       return evaluateSensor(key, hours);
+    }
+    if (key === 'temperature') {
+      // Threshold bands are defined in °F. Convert Celsius readings up
+      // before invoking evaluateSensor so the same band logic works
+      // regardless of the entity's reporting unit.
+      const unit = (this.hass?.states[info.entity_id]?.attributes
+                    ?.unit_of_measurement as string) ?? '';
+      const fahrenheit = unit.includes('C') ? (raw * 9 / 5) + 32 : raw;
+      return evaluateSensor(key, fahrenheit);
     }
     return evaluateSensor(key, raw);
   }

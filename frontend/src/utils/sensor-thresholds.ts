@@ -221,18 +221,26 @@ const METRICS: Record<MetricKey, MetricSpec> = {
   },
 
   temperature: {
-    // Range chosen to accommodate either Fahrenheit or Celsius readings
-    // without per-unit branching. 0–120 maps:
-    //   °F: 73 → 61% fill (warm room), 105 → 87% (extreme heat)
-    //   °C: 25 → 21% fill (warm room), 45 → 38% (extreme heat)
-    // Always-info classify — ambient temperature has no universal good/
-    // bad threshold; bar is informational placement, not a health signal.
-    displayMin: 0,
-    displayMax: 120,
+    // Display range and band defined in °F. Caller (node-summary
+    // ._evaluateForRow) is responsible for converting Celsius readings
+    // to Fahrenheit before invoking evaluateSensor so a single set of
+    // thresholds applies regardless of the entity's reporting unit.
+    //
+    //  Red  : < 0°F  or > 125°F   (≈ < −18°C or > 52°C)
+    //  Green: 0°F to 125°F
+    //
+    // Chosen to flag electronics-damage extremes (battery freeze /
+    // thermal runaway risk) without trying to be more clever about
+    // ambient temperature elsewhere.
+    displayMin: -20,
+    displayMax: 140,
     direction: 'higher_better',
-    classify: () => 'info',
-    tooltip: '',
-    // No source — informational only.
+    classify: (v) => (v < 0 || v > 125 ? 'bad' : 'good'),
+    tooltip:
+      'Red below 0°F (≈ −18°C) or above 125°F (≈ 52°C); ' +
+      'green otherwise. Extreme ambient temperatures risk damage to ' +
+      'the radio, battery, or enclosure.',
+    // No source — chosen for electronics-stress, not ambient comfort.
   },
 };
 
