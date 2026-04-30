@@ -30,7 +30,7 @@ A contact is **Discovered** as soon as the companion hears its advertisement on 
 To promote one:
 
 1. Open the **Chat** tab.
-2. Click **Manage** in the top-right of the conversation list.
+2. Click **Manage** gear icon in the top-right of the conversation list.
 3. Switch to the **Contacts** sub-tab in the dialog.
 4. Use the filter chips to narrow to **Discovered**, optionally **Repeaters** or **Clients**.
 5. Find the node — sort by Last heard or type the name in the search box.
