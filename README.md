@@ -102,6 +102,12 @@ Works as a **companion** to the [core meshcore integration](https://github.com/m
 
 Copy `custom_components/meshcore_chat/` into your HA `config/custom_components/` directory. Restart HA. Add the integration from the UI.
 
+## Usage
+
+For a walkthrough of common tasks (adding contacts, managing channels, issuing commands, tracing paths, changing radio settings) plus operational warnings (radio-reboot requirements, the entity_id rename gotcha), see [INSTRUCTIONS.md](./INSTRUCTIONS.md).
+
+For the technical spec — every file's role, every WebSocket command, the non-obvious code paths — see [as_built.md](./as_built.md).
+
 ## Requirements
 
 - Home Assistant 2024.12 or newer
@@ -114,23 +120,7 @@ Copy `custom_components/meshcore_chat/` into your HA `config/custom_components/`
 
 ## Tips & Troubleshooting
 
-> Catch-all for short how-tos and known-quirk workarounds. As this list grows it will graduate to its own docs page.
-
-### Refreshing the firmware version on a managed repeater card
-
-The firmware version shown in a managed repeater's header (e.g. `Firmware: v1.14.1`) is captured by the upstream [meshcore-ha](https://github.com/meshcore-dev/meshcore-ha) integration once at config time and is **not periodically re-queried**. After flashing new firmware on a remote repeater, the displayed version stays stale until you ask the integration to re-query.
-
-To refresh:
-
-1. **Settings → Devices & Services**
-2. Click the **MeshCore** integration card
-3. Click **Configure**
-4. Click the repeater you flashed
-5. Click **Save** — you don't need to change anything; the save action triggers a `ver` query against the repeater and updates Home Assistant's device registry
-
-The chat panel will pick up the new value on next refresh.
-
-This is a limitation of the upstream integration, not the chat panel — the panel only displays what HA already knows. A future change to `meshcore-ha` could add `ver` to the periodic poll cycle and make this automatic.
+For day-to-day usage and operational notes, see [INSTRUCTIONS.md](./INSTRUCTIONS.md).
 
 ## Development
 
