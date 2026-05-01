@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -42,23 +43,40 @@ from .message_store import MessageStore
 from .panel import async_register_panel, async_remove_panel
 from .unread_tracking import UnreadTracker
 from .utils import enrich_rx_log_entries
-from .ws_api import async_register_ws_commands
 
 _LOGGER = logging.getLogger(__name__)
 
-# Per-instance bucket key holding the unsubscribe callbacks for the four
-# event listeners we register. Cleared in async_unload_entry.
-_LISTENERS_KEY = "listeners"
 
-# Domain-bucket flag keys (as opposed to per-entry sub-dicts). Used by
-# async_unload_entry to distinguish "another entry is still around" from
-# "only flags remain — safe to tear down process-global state".
-_DOMAIN_FLAGS = frozenset(
-    {"_panel_registered", "_ws_registered", "unread_tracker", "_service_surface_logged"}
-)
+@dataclass
+class MeshCoreChatRuntimeData:
+    """Per-entry runtime state for the MeshCore Chat companion.
+
+    Stored on ``entry.runtime_data`` (HA Bronze convention, post-2024.6).
+    Process-global state (panel registration, WS commands, unread tracker)
+    continues to live on ``hass.data[DOMAIN]`` because it is shared across
+    config entries — though the companion's config flow is single-instance,
+    so in practice there is at most one entry per HA process.
+    """
+
+    store: MessageStore
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+# Type alias for ConfigEntry parameterized with our runtime data shape.
+# Lets typecheckers verify ``entry.runtime_data`` is the expected type.
+type MeshCoreChatConfigEntry = ConfigEntry[MeshCoreChatRuntimeData]
+
+
+# NOTE: ws_api.py imports ``MeshCoreChatRuntimeData`` from this module.
+# Keep this import below the dataclass definition so the symbol exists on
+# the partially-initialized package when ws_api.py executes its top-level
+# imports during package load. The deliberate-ordering noqa silences the
+# E402 module-level-import-not-at-top warning.
+from .ws_api import async_register_ws_commands  # noqa: E402
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: MeshCoreChatConfigEntry
+) -> bool:
     """Set up MeshCore Chat from a config entry."""
     # Test-before-setup: refuse setup until the upstream meshcore
     # integration has at least one coordinator. The chat companion is
@@ -70,23 +88,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "set one up via Settings → Devices & Services."
         )
 
-    bucket = hass.data.setdefault(DOMAIN, {})
-    entry_bucket: dict[str, Any] = {}
-    bucket[entry.entry_id] = entry_bucket
-
-    # Process-global: register the sidebar panel exactly once. The panel
-    # is not per-entry — the config-flow is single-instance, so in practice
-    # this is also one-per-config-entry, but the guard protects against
-    # accidental re-registration if that invariant ever changes.
-    if not bucket.get("_panel_registered"):
-        await async_register_panel(hass)
-        bucket["_panel_registered"] = True
-        _LOGGER.debug("MeshCore Chat panel registered")
-
     # Initialize the per-entry message store and load its lightweight index.
     store = MessageStore(hass, entry)
     await store.async_load_index()
-    entry_bucket["store"] = store
+
+    # Per-entry runtime state lives on entry.runtime_data (Bronze pattern,
+    # post-2024.6). Process-global singletons (panel registration, WS
+    # commands, unread tracker) continue to live on hass.data[DOMAIN].
+    entry.runtime_data = MeshCoreChatRuntimeData(store=store)
 
     # Best-effort retention pass at startup. Failures here must not block
     # setup — they are logged and we continue.
@@ -96,6 +105,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.warning(
             "MessageStore retention cleanup failed at startup: %s", ex
         )
+
+    # Process-global state container — singleton flags + unread tracker.
+    bucket = hass.data.setdefault(DOMAIN, {})
+
+    # Process-global: register the sidebar panel exactly once. The panel
+    # is not per-entry — the config-flow is single-instance, so in practice
+    # this is also one-per-config-entry, but the guard protects against
+    # accidental re-registration if that invariant ever changes.
+    if not bucket.get("_panel_registered"):
+        await async_register_panel(hass)
+        bucket["_panel_registered"] = True
+        _LOGGER.debug("MeshCore Chat panel registered")
 
     # Unread tracker is a process-wide singleton (not per-entry) — the
     # frontend identifies conversations by entity_id, which is globally
@@ -125,32 +146,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.has_service(MESHCORE_DOMAIN, "trace"),
         )
 
-    # Subscribe to upstream meshcore events.
-    entry_bucket[_LISTENERS_KEY] = [
-        hass.bus.async_listen(
-            EVENT_MESHCORE_MESSAGE,
-            _make_message_handler(hass, entry.entry_id),
-        ),
-        hass.bus.async_listen(
-            EVENT_MESHCORE_DELIVERY_UPDATE,
-            _make_delivery_update_handler(hass, entry.entry_id),
-        ),
-        hass.bus.async_listen(
-            EVENT_MESHCORE_CONNECTED,
-            _make_connection_state_handler(hass, entry.entry_id, connected=True),
-        ),
-        hass.bus.async_listen(
-            EVENT_MESHCORE_DISCONNECTED,
-            _make_connection_state_handler(hass, entry.entry_id, connected=False),
-        ),
-    ]
+    # Subscribe to upstream meshcore events. ``entry.async_on_unload``
+    # tracks each unsub callback and invokes it on unload — no manual
+    # listener-list bookkeeping needed.
+    entry.async_on_unload(hass.bus.async_listen(
+        EVENT_MESHCORE_MESSAGE,
+        _make_message_handler(hass, entry.entry_id),
+    ))
+    entry.async_on_unload(hass.bus.async_listen(
+        EVENT_MESHCORE_DELIVERY_UPDATE,
+        _make_delivery_update_handler(hass, entry.entry_id),
+    ))
+    entry.async_on_unload(hass.bus.async_listen(
+        EVENT_MESHCORE_CONNECTED,
+        _make_connection_state_handler(hass, entry.entry_id, connected=True),
+    ))
+    entry.async_on_unload(hass.bus.async_listen(
+        EVENT_MESHCORE_DISCONNECTED,
+        _make_connection_state_handler(hass, entry.entry_id, connected=False),
+    ))
 
     # Re-run retention cleanup when options change (per-conversation cap
     # is read lazily on each save and needs no listener; retention days
     # do because the prune pass only runs at startup otherwise).
-    entry_bucket[_LISTENERS_KEY].append(
-        entry.add_update_listener(_async_options_updated)
-    )
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     _LOGGER.info(
         "MeshCore Chat configured for entry %s (%d conversations indexed)",
@@ -160,30 +179,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Tear down a config entry."""
-    bucket = hass.data.get(DOMAIN, {})
-    entry_bucket = bucket.pop(entry.entry_id, None)
-    if not entry_bucket:
-        return True
+async def async_unload_entry(
+    hass: HomeAssistant, entry: MeshCoreChatConfigEntry
+) -> bool:
+    """Tear down a config entry.
 
-    # Per-entry teardown: unsubscribe event listeners and unload the store.
-    for unsub in entry_bucket.get(_LISTENERS_KEY, []):
-        try:
-            unsub()
-        except Exception:  # pragma: no cover - defensive
-            pass
-
-    store: MessageStore | None = entry_bucket.get("store")
-    if store is not None:
-        await store.async_unload()
+    Event-bus subscriptions and the options-update listener registered in
+    ``async_setup_entry`` were attached via ``entry.async_on_unload`` —
+    HA invokes their unsub callbacks itself as part of the unload pipeline,
+    so no manual listener loop is required here.
+    """
+    runtime = entry.runtime_data
+    if isinstance(runtime, MeshCoreChatRuntimeData):
+        await runtime.store.async_unload()
 
     # If this was the last config entry, drop the process-global state
-    # too (panel registration, WS commands, UnreadTracker). After popping
-    # this entry, anything left in the bucket that *isn't* a known flag
-    # means another entry is still live.
-    remaining = [k for k in bucket if k not in _DOMAIN_FLAGS]
-    if not remaining:
+    # too (panel registration, UnreadTracker counts). hass.config_entries
+    # still includes the entry being unloaded at this point, so exclude
+    # it explicitly when checking for siblings.
+    bucket = hass.data.get(DOMAIN, {})
+    other_entries = [
+        e for e in hass.config_entries.async_entries(DOMAIN)
+        if e.entry_id != entry.entry_id
+    ]
+    if not other_entries:
         if bucket.get("_panel_registered"):
             await async_remove_panel(hass)
             bucket.pop("_panel_registered", None)
@@ -443,14 +462,15 @@ def _make_connection_state_handler(
 
 def _resolve_store(hass: HomeAssistant, entry_id: str) -> MessageStore | None:
     """Look up the MessageStore for an entry, defensively."""
-    bucket = hass.data.get(DOMAIN, {}).get(entry_id)
-    if not bucket:
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or not isinstance(entry.runtime_data, MeshCoreChatRuntimeData):
         return None
-    store = bucket.get("store")
-    return store if isinstance(store, MessageStore) else None
+    return entry.runtime_data.store
 
 
-async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_options_updated(
+    hass: HomeAssistant, entry: MeshCoreChatConfigEntry
+) -> None:
     """Handle options-flow updates without requiring an HA restart.
 
     Retention values are read lazily from ``entry.options`` on each
