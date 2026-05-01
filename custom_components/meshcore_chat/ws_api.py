@@ -10,6 +10,7 @@ See proposal Change 5 (extended scope per 2026-04-22 user direction).
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -911,11 +912,12 @@ async def ws_execute_remote(hass, connection, msg):
 
         # Send login if password is available
         if password:
-            login_result = await coordinator.api.mesh_core.commands.send_login(
-                contact, password
-            )
-            # Wait a moment for login to be processed
-            await hass.async_add_executor_job(time.sleep, 0.5)
+            await coordinator.api.mesh_core.commands.send_login(contact, password)
+            # Wait a moment for login to be processed before issuing the
+            # command. The 0.5s is empirical, mirroring the upstream
+            # meshcore integration's services.py — replace with an event-
+            # driven wait when the SDK exposes a login-complete signal.
+            await asyncio.sleep(0.5)
 
         # Send the command
         cmd_result = await coordinator.api.mesh_core.commands.send_cmd(
@@ -1169,7 +1171,7 @@ async def ws_remove_neighbor(hass, connection, msg):
         # Send login if password is available
         if password:
             await coordinator.api.mesh_core.commands.send_login(contact, password)
-            await hass.async_add_executor_job(time.sleep, 0.5)
+            await asyncio.sleep(0.5)
 
         # Send neighbor.remove command to the repeater
         cmd_result = await coordinator.api.mesh_core.commands.send_cmd(
@@ -1215,8 +1217,10 @@ async def ws_remove_neighbor(hass, connection, msg):
             sensor_key = f"{target_prefix}:{neighbor_pubkey}"
             coordinator._created_neighbor_sensors.discard(sensor_key)
 
-            # Persist updated data (fire-and-forget, mirrors upstream).
-            hass.async_create_task(coordinator._save_neighbor_data())
+            # Persist updated data — await so that a failure surfaces in
+            # the WS response rather than being silently logged via the
+            # background-task harness.
+            await coordinator._save_neighbor_data()
         except Exception as cleanup_ex:
             _LOGGER.warning(
                 "Inlined remove_single_neighbor cleanup failed for %s/%s: %s",
@@ -1756,7 +1760,6 @@ async def _ws_trace_explicit(
     around this by letting the user type the hop sequence manually;
     this branch mirrors that workaround.
     """
-    import asyncio
     import random
 
     coordinator = _get_coordinator(hass, msg.get("entry_id"))
