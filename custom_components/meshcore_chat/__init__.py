@@ -30,6 +30,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 
 from .const import (
     DOMAIN,
@@ -82,11 +83,29 @@ async def async_setup_entry(
     # integration has at least one coordinator. The chat companion is
     # useless without it, and HA will retry async_setup_entry
     # automatically when the dependency becomes ready.
+    #
+    # ConfigEntryNotReady alone is invisible to non-developers — HA
+    # surfaces it as a generic "Setup retry" badge with no remediation
+    # text. Pair it with a Repairs issue so the user gets a clickable
+    # explanation of what to do (install/configure meshcore, or remove
+    # meshcore_chat) on the Settings → System → Repairs page.
     if not hass.data.get(MESHCORE_DOMAIN):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            "upstream_meshcore_unavailable",
+            is_fixable=True,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="upstream_meshcore_unavailable",
+        )
         raise ConfigEntryNotReady(
             "Upstream meshcore integration has no active config entries — "
             "set one up via Settings → Devices & Services."
         )
+
+    # Upstream is back (or never went away) — clear any stale repair
+    # issue so the Repairs panel doesn't show a fixed problem.
+    ir.async_delete_issue(hass, DOMAIN, "upstream_meshcore_unavailable")
 
     # Initialize the per-entry message store and load its lightweight index.
     store = MessageStore(hass, entry)
