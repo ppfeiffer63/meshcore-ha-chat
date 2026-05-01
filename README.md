@@ -2,7 +2,7 @@
 
 # MeshCore Chat for Home Assistant
 
-A sidebar chat panel and persistent message store for the [MeshCore](https://meshcore.io) mesh radio network that was written by an agent, carefully tested by a human.
+A sidebar chat panel and persistent message store for the [MeshCore](https://meshcore.io) mesh radio network that was written by an agent, thoroughly reviewed and carefully tested by a human.
 
 Works as a **companion** to the [core meshcore integration](https://github.com/meshcore-dev/meshcore-ha) — install both. This integration does not drive the radio itself; it adds a chat UI, message persistence, and search on top of the events and services exposed by the core integration.
 
