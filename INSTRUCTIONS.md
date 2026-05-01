@@ -1,6 +1,6 @@
 # Using MeshCore Chat
 
-The MeshCore Chat interface should be intuitive for common tasks; this document mostly covers dialogs (accessed by clicking pencil or gear icons, etc.) and integration functions that might not be as easy to find or understand.
+The MeshCore Chat interface should be intuitive for common tasks; this document mostly covers dialogs (accessed by clicking gear icons, etc.) and integration functions that might not be as easy to find or understand.
 
 These instructions are a walkthrough of the administrative tasks the panel is built for, plus the operational gotchas worth knowing in advance. Assumes you've already followed the install steps in [README.md](./README.md) and the **MeshCore Chat** entry is in your sidebar.
 

@@ -2,7 +2,7 @@
 
 # MeshCore Chat for Home Assistant
 
-A sidebar chat panel and persistent message store for the [MeshCore](https://meshcore.io) mesh radio network.
+A sidebar chat panel and persistent message store for the [MeshCore](https://meshcore.io) mesh radio network that was written by an agent, carefully tested by a human.
 
 Works as a **companion** to the [core meshcore integration](https://github.com/meshcore-dev/meshcore-ha) — install both. This integration does not drive the radio itself; it adds a chat UI, message persistence, and search on top of the events and services exposed by the core integration.
 
@@ -106,8 +106,6 @@ Copy `custom_components/meshcore_chat/` into your HA `config/custom_components/`
 
 For a walkthrough of common tasks (adding contacts, managing channels, issuing commands, tracing paths, changing radio settings) plus operational warnings (radio-reboot requirements, the entity_id rename gotcha), see [INSTRUCTIONS.md](./INSTRUCTIONS.md).
 
-For the technical spec — every file's role, every WebSocket command, the non-obvious code paths — see [as_built.md](./as_built.md).
-
 ## Requirements
 
 - Home Assistant 2024.12 or newer
@@ -116,25 +114,10 @@ For the technical spec — every file's role, every WebSocket command, the non-o
 ## Relationship to other projects
 
 - [meshcore-dev/meshcore-ha](https://github.com/meshcore-dev/meshcore-ha) — the core integration that drives the MeshCore radio. **Required.**
-- [Ratty7198/MeshCore-HA-UI](https://github.com/Ratty7198/MeshCore-HA-UI) — an alternative companion UI. Great work; this project differs by using a typed/compiled Lit frontend and adding per-conversation persistence, search, and a trace dialog. The two projects use distinct domains, panel URLs, and webcomponent tags so they can coexist on the same HA instance, but installing both produces two sidebar entries — pick one.
 
 ## Tips & Troubleshooting
 
-For day-to-day usage and operational notes, see [INSTRUCTIONS.md](./INSTRUCTIONS.md).
-
-## Development
-
-The frontend source lives at `frontend/` (repo root). The build environment doesn't ship to HACS users — only the compiled bundle at `custom_components/meshcore_chat/meshcore-chat-panel.js` does.
-
-To rebuild after editing source:
-
-```
-cd frontend
-npm install
-npm run build
-```
-
-Rollup writes the bundle directly to `../custom_components/meshcore_chat/meshcore-chat-panel.js`. Commit the rebuilt bundle when source changes.
+The integration should be fairly easy to understand and navigate, for instructions on dialog pop-ups and operational gotchas worth knowing, see [INSTRUCTIONS.md](./INSTRUCTIONS.md).
 
 ## License
 
