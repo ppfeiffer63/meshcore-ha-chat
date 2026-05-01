@@ -145,6 +145,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
     ]
 
+    # Re-run retention cleanup when options change (per-conversation cap
+    # is read lazily on each save and needs no listener; retention days
+    # do because the prune pass only runs at startup otherwise).
+    entry_bucket[_LISTENERS_KEY].append(
+        entry.add_update_listener(_async_options_updated)
+    )
+
     _LOGGER.info(
         "MeshCore Chat configured for entry %s (%d conversations indexed)",
         entry.entry_id,
@@ -441,3 +448,21 @@ def _resolve_store(hass: HomeAssistant, entry_id: str) -> MessageStore | None:
         return None
     store = bucket.get("store")
     return store if isinstance(store, MessageStore) else None
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options-flow updates without requiring an HA restart.
+
+    Retention values are read lazily from ``entry.options`` on each
+    MessageStore call, so per-conversation caps take effect immediately
+    on the next save. The retention-window threshold, however, is only
+    applied during ``cleanup_old_messages`` — re-run it now so a tighter
+    retention window prunes immediately rather than at next HA startup.
+    """
+    store = _resolve_store(hass, entry.entry_id)
+    if store is None:
+        return
+    try:
+        await store.cleanup_old_messages()
+    except Exception as ex:  # pragma: no cover - defensive
+        _LOGGER.warning("Options-update retention pass failed: %s", ex)
