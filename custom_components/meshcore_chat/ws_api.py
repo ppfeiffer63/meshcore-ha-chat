@@ -809,6 +809,18 @@ async def ws_execute_local(hass, connection, msg):
     command = msg.get("command")
     args = msg.get("args", {})
 
+    # Defense-in-depth against dunder-method invocation via getattr. The
+    # frontend's commands/local-commands.ts catalogue is an *implicit*
+    # allowlist; the WS surface itself accepts any method name. Without
+    # this guard, an admin (or a future non-admin if require_admin is
+    # ever loosened) could invoke methods like __init__ or any future
+    # _internal_* SDK helper that becomes reachable through getattr.
+    if not command or command.startswith("_"):
+        connection.send_error(
+            msg["id"], "invalid", f"Invalid command name: {command!r}"
+        )
+        return
+
     try:
         # Get the command method from mesh_core.commands
         command_method = getattr(coordinator.api.mesh_core.commands, command, None)
