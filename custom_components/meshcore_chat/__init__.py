@@ -28,6 +28,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
     DOMAIN,
@@ -59,6 +60,16 @@ _DOMAIN_FLAGS = frozenset(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up MeshCore Chat from a config entry."""
+    # Test-before-setup: refuse setup until the upstream meshcore
+    # integration has at least one coordinator. The chat companion is
+    # useless without it, and HA will retry async_setup_entry
+    # automatically when the dependency becomes ready.
+    if not hass.data.get(MESHCORE_DOMAIN):
+        raise ConfigEntryNotReady(
+            "Upstream meshcore integration has no active config entries — "
+            "set one up via Settings → Devices & Services."
+        )
+
     bucket = hass.data.setdefault(DOMAIN, {})
     entry_bucket: dict[str, Any] = {}
     bucket[entry.entry_id] = entry_bucket
