@@ -23,7 +23,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 
-from . import MeshCoreChatRuntimeData
+from . import MeshCoreChatRuntimeData, _sync_upstream_repair_issue
 from .const import DOMAIN, MESHCORE_DOMAIN, ENTITY_DOMAIN_BINARY_SENSOR
 from .message_store import MessageStore
 from .utils import format_entity_id, sanitize_name
@@ -104,16 +104,14 @@ def _t(key: str) -> str:
     return _EXCEPTION_MESSAGES.get(key) or _EXCEPTION_FALLBACKS.get(key) or key
 
 
-def _get_coordinator(hass: HomeAssistant, entry_id: str | None = None):
-    """Get the upstream meshcore coordinator for ``entry_id``, or first available.
+def _resolve_coordinator(hass: HomeAssistant, entry_id: str | None = None):
+    """Discovery-only: locate the upstream meshcore coordinator.
 
-    The companion does not own a coordinator — it consumes the upstream
-    integration's coordinator via ``hass.data[MESHCORE_DOMAIN][meshcore_entry_id]``.
-    The ``entry_id`` argument here, when supplied by the frontend, is the
-    *upstream* meshcore config-entry id (the chat panel discovers it via the
-    ``meshcore_chat/get_devices`` command, which in turn reads upstream's
-    coordinator registry). When omitted, the first registered upstream
-    coordinator is used.
+    Pure lookup — no side effects. The wrapper ``_get_coordinator`` is
+    the public-ish entry point that adds the repair-issue sync; this
+    inner helper is what callers use when they need the discovery result
+    without triggering the issue create/delete (currently only the
+    wrapper itself).
     """
     if MESHCORE_DOMAIN not in hass.data:
         return None
@@ -131,8 +129,12 @@ def _get_coordinator(hass: HomeAssistant, entry_id: str | None = None):
     return None
 
 
-def _get_all_coordinators(hass: HomeAssistant) -> list:
-    """Get all active upstream coordinators."""
+def _resolve_all_coordinators(hass: HomeAssistant) -> list:
+    """Discovery-only: enumerate all active upstream coordinators.
+
+    Pure lookup — no side effects. See ``_resolve_coordinator`` doc for
+    the inner-vs-wrapper split.
+    """
     if MESHCORE_DOMAIN not in hass.data:
         return []
     return [
@@ -140,6 +142,39 @@ def _get_all_coordinators(hass: HomeAssistant) -> list:
         for entry_id, coord in hass.data[MESHCORE_DOMAIN].items()
         if hasattr(coord, "api")
     ]
+
+
+def _get_coordinator(hass: HomeAssistant, entry_id: str | None = None):
+    """Get the upstream meshcore coordinator for ``entry_id``, or first available.
+
+    The companion does not own a coordinator — it consumes the upstream
+    integration's coordinator via ``hass.data[MESHCORE_DOMAIN][meshcore_entry_id]``.
+    The ``entry_id`` argument here, when supplied by the frontend, is the
+    *upstream* meshcore config-entry id (the chat panel discovers it via the
+    ``meshcore_chat/get_devices`` command, which in turn reads upstream's
+    coordinator registry). When omitted, the first registered upstream
+    coordinator is used.
+
+    Side effect: synchronizes the ``upstream_meshcore_unavailable`` repair
+    issue based on what discovery just observed. Idempotent (HA dedupes
+    by (domain, issue_id); delete-on-non-existent is a no-op), so the
+    panel-polling rate is safe.
+    """
+    coord = _resolve_coordinator(hass, entry_id)
+    _sync_upstream_repair_issue(hass)
+    return coord
+
+
+def _get_all_coordinators(hass: HomeAssistant) -> list:
+    """Get all active upstream coordinators.
+
+    Side effect: synchronizes the ``upstream_meshcore_unavailable`` repair
+    issue based on what discovery just observed (see ``_get_coordinator``
+    for the rationale).
+    """
+    coords = _resolve_all_coordinators(hass)
+    _sync_upstream_repair_issue(hass)
+    return coords
 
 
 # Maps Python exception types to WS error codes + translation keys.
