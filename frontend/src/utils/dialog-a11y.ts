@@ -267,29 +267,41 @@ export class DialogA11yController implements ReactiveController {
 
     const items = this._getFocusables();
     if (items.length === 0) return;
-    const first = items[0];
-    const last = items[items.length - 1];
     const scope = this.opts.getScope?.() ?? this.host.shadowRoot;
     const focusedInScope = scope
       ? this._findFocusedInScope(scope as ParentNode)
       : null;
 
-    if (!focusedInScope) {
-      // Focus is outside our scope — pull it in.
-      e.preventDefault();
-      e.stopPropagation();
-      (e.shiftKey ? last : first).focus();
-      return;
+    // Handle Tab navigation entirely ourselves rather than letting the
+    // browser advance focus natively. This makes Tab cycle through
+    // every focusable in `items` (including buttons) regardless of the
+    // user's macOS "keyboard navigation" system preference, which by
+    // default restricts native Tab to text inputs and dropdowns in
+    // Safari and other system-Tab-respecting apps. Cycling our own
+    // items list also guarantees the trap stays inside the dialog
+    // even mid-list when the next browser-native focusable would be
+    // outside our scope.
+    const currentIdx = focusedInScope ? items.indexOf(focusedInScope) : -1;
+    let nextIdx: number;
+    if (e.shiftKey) {
+      // Shift+Tab: previous item; wrap from first to last; if focus is
+      // outside the scope, land on the last item.
+      nextIdx = currentIdx <= 0 ? items.length - 1 : currentIdx - 1;
+    } else {
+      // Tab: next item; wrap from last to first; if focus is outside
+      // the scope, land on the first item.
+      nextIdx =
+        currentIdx === -1 || currentIdx >= items.length - 1
+          ? 0
+          : currentIdx + 1;
     }
 
-    if (e.shiftKey && focusedInScope === first) {
-      e.preventDefault();
-      e.stopPropagation();
-      last.focus();
-    } else if (!e.shiftKey && focusedInScope === last) {
-      e.preventDefault();
-      e.stopPropagation();
-      first.focus();
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      items[nextIdx].focus();
+    } catch {
+      /* ignore */
     }
   }
 
