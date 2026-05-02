@@ -10,6 +10,7 @@ import '../components/confirm-dialog';
 import '../components/command-dialog';
 import { longPress } from '../directives/long-press';
 import { loadMeshcoreEntityRegistry, type EntityInfo } from '../utils/classify-entity';
+import { attachDialogA11y } from '../utils/dialog-a11y';
 
 @customElement('meshcore-devices-page')
 export class DevicesPage extends LitElement {
@@ -74,6 +75,34 @@ export class DevicesPage extends LitElement {
     loading: boolean;
     loaded: boolean;
   }> = {};
+
+  constructor() {
+    super();
+    // Phase 5 Q13: focus trap + Escape closes inline modals. One
+    // controller per modal-state pair. getScope targets a unique
+    // wrapper class (added below) so the focus trap is scoped to the
+    // open modal, not the whole page.
+    attachDialogA11y(this, {
+      isOpen: () => this._contextMenu !== null,
+      onEscape: () => this._dismissContextMenu(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="tile-context"]'),
+    });
+    attachDialogA11y(this, {
+      isOpen: () => this._neighborContextMenu !== null,
+      onEscape: () => this._dismissNeighborContextMenu(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="neighbor-context"]'),
+    });
+    attachDialogA11y(this, {
+      isOpen: () => this._settingsDeviceKey !== null,
+      onEscape: () => this._closeSettingsModal(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="device-settings"]'),
+    });
+    attachDialogA11y(this, {
+      isOpen: () => this._hiddenSensorsModalKey !== null,
+      onEscape: () => this._closeHiddenSensorsModal(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="hidden-sensors"]'),
+    });
+  }
 
   static styles = [
     panelStyles,
@@ -706,11 +735,13 @@ export class DevicesPage extends LitElement {
         <div class="modal-overlay"
              @pointerdown=${this._onOverlayPointerDown}
              @click=${this._closeContextMenu}>
-          <div class="modal-card" @click=${(e: Event) => e.stopPropagation()}
+          <div class="modal-card" data-a11y="tile-context"
+               role="dialog" aria-modal="true" aria-label="${this._contextMenu.label} actions"
+               @click=${(e: Event) => e.stopPropagation()}
                @pointerdown=${(e: Event) => e.stopPropagation()}>
             <div class="modal-header">
               <span class="modal-title">${this._contextMenu.label}</span>
-              <button class="modal-close" @click=${this._dismissContextMenu}
+              <button class="modal-close" aria-label="Close" @click=${this._dismissContextMenu}
                       @pointerdown=${(e: Event) => e.stopPropagation()}>&times;</button>
             </div>
             <div class="modal-body">
@@ -728,11 +759,13 @@ export class DevicesPage extends LitElement {
         <div class="modal-overlay"
              @pointerdown=${this._onOverlayPointerDown}
              @click=${this._closeNeighborContextMenu}>
-          <div class="modal-card" @click=${(e: Event) => e.stopPropagation()}
+          <div class="modal-card" data-a11y="neighbor-context"
+               role="dialog" aria-modal="true" aria-label="${this._neighborContextMenu.name} actions"
+               @click=${(e: Event) => e.stopPropagation()}
                @pointerdown=${(e: Event) => e.stopPropagation()}>
             <div class="modal-header">
               <span class="modal-title">${this._neighborContextMenu.name}</span>
-              <button class="modal-close" @click=${this._dismissNeighborContextMenu}
+              <button class="modal-close" aria-label="Close" @click=${this._dismissNeighborContextMenu}
                       @pointerdown=${(e: Event) => e.stopPropagation()}>&times;</button>
             </div>
             <div class="modal-body">
@@ -750,10 +783,12 @@ export class DevicesPage extends LitElement {
         const ctx = this._getSettingsDeviceContext();
         return ctx ? html`
         <div class="modal-overlay" @click=${this._closeSettingsModal}>
-          <div class="modal-card" @click=${(e: Event) => e.stopPropagation()}>
+          <div class="modal-card" data-a11y="device-settings"
+               role="dialog" aria-modal="true" aria-label="${ctx.name} settings"
+               @click=${(e: Event) => e.stopPropagation()}>
             <div class="modal-header">
               <span class="modal-title">${ctx.name} Settings</span>
-              <button class="modal-close" @click=${this._closeSettingsModal}>&times;</button>
+              <button class="modal-close" aria-label="Close" @click=${this._closeSettingsModal}>&times;</button>
             </div>
             <div class="modal-body">
               <button class="modal-action" @click=${this._openHiddenSensorsList}>
@@ -1478,10 +1513,12 @@ export class DevicesPage extends LitElement {
 
     return html`
       <div class="modal-overlay" @click=${this._closeHiddenSensorsModal}>
-        <div class="modal-card" @click=${(e: Event) => e.stopPropagation()}>
+        <div class="modal-card" data-a11y="hidden-sensors"
+             role="dialog" aria-modal="true" aria-label="Hidden sensors"
+             @click=${(e: Event) => e.stopPropagation()}>
           <div class="modal-header">
             <span class="modal-title">Hidden Sensors</span>
-            <button class="modal-close" @click=${this._closeHiddenSensorsModal}>&times;</button>
+            <button class="modal-close" aria-label="Close" @click=${this._closeHiddenSensorsModal}>&times;</button>
           </div>
           <div class="modal-body">
             ${hiddenItems.length === 0

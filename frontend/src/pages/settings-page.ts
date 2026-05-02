@@ -13,6 +13,7 @@ import '../components/confirm-dialog';
 import '../components/command-dialog';
 import '../components/sensor-tile';
 import '../components/node-summary';
+import { attachDialogA11y } from '../utils/dialog-a11y';
 import type { CompanionDeviceDescriptor } from '../components/node-summary';
 import { panelStyles } from '../styles';
 import { loadMeshcoreEntityRegistry, type EntityInfo } from '../utils/classify-entity';
@@ -67,6 +68,31 @@ export class SettingsPage extends LitElement {
   // Status toast
   @state() private _statusMessage: { text: string; type: 'success' | 'error' } | null = null;
   private _statusMessageTimeout: number | null = null;
+
+  constructor() {
+    super();
+    // Phase 5 Q13: focus trap + Escape closes inline modals.
+    attachDialogA11y(this, {
+      isOpen: () => this._contextMenu !== null,
+      onEscape: () => this._closeContextMenu(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="tile-context"]'),
+    });
+    attachDialogA11y(this, {
+      isOpen: () => this._settingsModalOpen,
+      onEscape: () => this._closeSettingsModal(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="companion-settings"]'),
+    });
+    attachDialogA11y(this, {
+      isOpen: () => this._keyManagementModalOpen,
+      onEscape: () => this._closeKeyManagementModal(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="key-management"]'),
+    });
+    attachDialogA11y(this, {
+      isOpen: () => this._hiddenSensorsModalKey !== null,
+      onEscape: () => this._closeHiddenSensorsModal(),
+      getScope: () => this.shadowRoot?.querySelector('[data-a11y="hidden-sensors"]'),
+    });
+  }
 
   static styles = [
     panelStyles,
@@ -683,11 +709,13 @@ export class SettingsPage extends LitElement {
         <div class="modal-overlay"
              @pointerdown=${this._onOverlayPointerDown}
              @click=${this._closeContextMenu}>
-          <div class="modal-card" @click=${(e: Event) => e.stopPropagation()}
+          <div class="modal-card" data-a11y="tile-context"
+               role="dialog" aria-modal="true" aria-label="${this._contextMenu.label} actions"
+               @click=${(e: Event) => e.stopPropagation()}
                @pointerdown=${(e: Event) => e.stopPropagation()}>
             <div class="modal-header">
               <span class="modal-title">${this._contextMenu.label}</span>
-              <button class="modal-close" @click=${this._closeContextMenu}
+              <button class="modal-close" aria-label="Close" @click=${this._closeContextMenu}
                       @pointerdown=${(e: Event) => e.stopPropagation()}>&times;</button>
             </div>
             <div class="modal-body">
@@ -703,10 +731,12 @@ export class SettingsPage extends LitElement {
       <!-- Settings Modal -->
       ${this._settingsModalOpen ? html`
         <div class="modal-overlay" @click=${this._closeSettingsModal}>
-          <div class="modal-card" @click=${(e: Event) => e.stopPropagation()}>
+          <div class="modal-card" data-a11y="companion-settings"
+               role="dialog" aria-modal="true" aria-label="Companion settings"
+               @click=${(e: Event) => e.stopPropagation()}>
             <div class="modal-header">
               <span class="modal-title">Companion Settings</span>
-              <button class="modal-close" @click=${this._closeSettingsModal}>&times;</button>
+              <button class="modal-close" aria-label="Close" @click=${this._closeSettingsModal}>&times;</button>
             </div>
             <div class="modal-body">
               <button class="modal-action" @click=${this._openHiddenSensorsList}>
@@ -738,10 +768,13 @@ export class SettingsPage extends LitElement {
       <!-- Key Management Modal -->
       ${this._keyManagementModalOpen ? html`
         <div class="modal-overlay" @click=${this._closeKeyManagementModal}>
-          <div class="modal-card" style="max-width: 440px;" @click=${(e: Event) => e.stopPropagation()}>
+          <div class="modal-card" data-a11y="key-management"
+               role="dialog" aria-modal="true" aria-label="Key management"
+               style="max-width: 440px;"
+               @click=${(e: Event) => e.stopPropagation()}>
             <div class="modal-header">
               <span class="modal-title">Key Management</span>
-              <button class="modal-close" @click=${this._closeKeyManagementModal}>&times;</button>
+              <button class="modal-close" aria-label="Close" @click=${this._closeKeyManagementModal}>&times;</button>
             </div>
             <div class="modal-body" style="padding: 16px 20px;">
               ${this._renderIdentityManagement()}
@@ -858,10 +891,12 @@ export class SettingsPage extends LitElement {
 
     return html`
       <div class="modal-overlay" @click=${this._closeHiddenSensorsModal}>
-        <div class="modal-card" @click=${(e: Event) => e.stopPropagation()}>
+        <div class="modal-card" data-a11y="hidden-sensors"
+             role="dialog" aria-modal="true" aria-label="Hidden sensors"
+             @click=${(e: Event) => e.stopPropagation()}>
           <div class="modal-header">
             <span class="modal-title">Hidden Sensors</span>
-            <button class="modal-close" @click=${this._closeHiddenSensorsModal}>&times;</button>
+            <button class="modal-close" aria-label="Close" @click=${this._closeHiddenSensorsModal}>&times;</button>
           </div>
           <div class="modal-body">
             ${hiddenItems.length === 0

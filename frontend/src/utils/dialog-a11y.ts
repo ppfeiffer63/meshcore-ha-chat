@@ -1,12 +1,11 @@
 /**
  * Dialog accessibility helper — focus trap + Escape-to-close.
  *
- * Phase 5 of the HA Quality + Best Practices Remediation (Q13). The same
- * pattern is needed by every modal dialog component in
- * `frontend/src/components/`, so it is implemented once as a Lit
- * ReactiveController and adopted with a one-line constructor call.
+ * Phase 5 of the HA Quality + Best Practices Remediation (Q13). The
+ * same pattern is needed by every modal dialog in `frontend/src/`, so
+ * it is implemented once and adopted via a one-line constructor call.
  *
- * Usage:
+ * Usage (component-class dialog):
  *
  * ```ts
  * import { attachDialogA11y } from '../utils/dialog-a11y';
@@ -24,41 +23,51 @@
  *   }
  *
  *   private _close() {
- *     this.open = false;
  *     this.dispatchEvent(new CustomEvent('close', { bubbles: true }));
  *   }
  * }
  * ```
  *
- * The `attachDialogA11y` helper is preferred over storing the controller
- * reference because Lit's host.addController side effect is the only
- * thing callers need — the returned reference would be unused and trip
- * `noUnusedLocals`.
+ * Usage (inline modal inside a page's render output):
  *
- * Behavior:
+ * ```ts
+ * @customElement('meshcore-some-page')
+ * export class SomePage extends LitElement {
+ *   @state() private _settingsOpen = false;
  *
- *   - When `isOpen()` transitions from false to true, focus moves to the
- *     first focusable descendant inside the host's shadow root.
- *   - Tab from the last focusable wraps to the first; Shift+Tab from the
- *     first wraps to the last. Focus stays inside the dialog.
- *   - Escape calls `onEscape()` and stops propagation so a wrapping
- *     dialog (e.g., a confirm sheet inside a manage dialog) does not
- *     also close.
- *   - When the dialog closes, focus is restored to the element that was
- *     focused before it opened, when that element is still in the DOM.
+ *   constructor() {
+ *     super();
+ *     attachDialogA11y(this, {
+ *       isOpen: () => this._settingsOpen,
+ *       onEscape: () => { this._settingsOpen = false; },
+ *       getScope: () => this.shadowRoot?.querySelector('.settings-modal'),
+ *     });
+ *   }
+ * }
+ * ```
  *
- * Notes:
+ * `getScope` lets one host (the page) own multiple inline modals — one
+ * `attachDialogA11y` call per modal, each with its own `isOpen` and
+ * scope selector. The page's host element listens once via the shared
+ * document-level listener (see below).
  *
- *   - The keydown listener is registered on the host element. Events
- *     from the shadow root bubble through the host before reaching
- *     light-DOM ancestors, so this single registration covers every
- *     focusable descendant.
- *   - `shadowRoot.activeElement` is used (not `document.activeElement`)
- *     to identify the focused descendant; `document.activeElement`
- *     returns the host itself across the shadow boundary.
- *   - Components whose `:host` uses `display: contents` (so the host
- *     does not render a real box) still work — the keydown listener is
- *     on the host element, not on a layout box.
+ * Implementation notes:
+ *
+ *   - **Single document-level capture-phase listener.** Catches every
+ *     keydown before any host-level or app-level bubble listener can
+ *     consume it. (HA's frontend has its own keydown handlers; using
+ *     bubble-phase here proved unreliable in practice.) The listener
+ *     is registered exactly once for the whole panel.
+ *   - **Modal stack.** Each open dialog pushes itself onto a global
+ *     stack on open, pops on close. Only the top of the stack handles
+ *     each keystroke. Nested dialogs (e.g., manage-dialog opens
+ *     channel-dialog) get the right semantics: Escape on the inner
+ *     dialog closes only the inner one.
+ *   - **`shadowRoot.activeElement`** is used to identify the focused
+ *     descendant inside a dialog; `document.activeElement` returns the
+ *     host across the shadow boundary.
+ *   - **Components whose `:host` uses `display: contents`** still work
+ *     — the controller doesn't depend on host event listeners.
  */
 
 import type { ReactiveController, ReactiveControllerHost } from 'lit';
@@ -80,41 +89,70 @@ export interface DialogA11yOptions {
   onEscape: () => void;
   /**
    * Optional focusable-scope override. Defaults to the host's shadow
-   * root. Override only if the dialog renders into a portal or light DOM.
+   * root. For inline modals rendered inside a larger page, return the
+   * modal's root element so the focus trap doesn't bleed across the
+   * whole page.
    */
-  getScope?: () => ParentNode | null;
+  getScope?: () => Element | DocumentFragment | null | undefined;
 }
 
 type Host = ReactiveControllerHost & HTMLElement;
 
+// ─── Global modal stack and shared keydown listener ──────────────────
+
+/** Stack of open dialog controllers, newest on top. */
+const _openStack: DialogA11yController[] = [];
+let _listenerRegistered = false;
+
+function _ensureListener(): void {
+  if (_listenerRegistered) return;
+  _listenerRegistered = true;
+  // Capture phase: fires before any bubble-phase listener (including
+  // HA's frontend keydown handlers). Without capture, the event can be
+  // consumed before reaching us.
+  document.addEventListener('keydown', _onGlobalKeyDown, true);
+}
+
+function _onGlobalKeyDown(e: KeyboardEvent): void {
+  if (_openStack.length === 0) return;
+  const top = _openStack[_openStack.length - 1];
+  top._handleKeyDown(e);
+}
+
+// ─── Controller ──────────────────────────────────────────────────────
+
 export class DialogA11yController implements ReactiveController {
   private _wasOpen = false;
   private _previousActive: Element | null = null;
+  private _inStack = false;
 
   constructor(private host: Host, private opts: DialogA11yOptions) {
     this.host.addController(this);
+    _ensureListener();
   }
 
   hostConnected(): void {
-    this.host.addEventListener('keydown', this._onKeyDown);
+    // Listener is global; nothing to do per-connection beyond ensuring
+    // the global is alive. _ensureListener is idempotent.
+    _ensureListener();
   }
 
   hostDisconnected(): void {
-    this.host.removeEventListener('keydown', this._onKeyDown);
-    // If the host vanishes mid-open, drop the captured reference so we
-    // don't leak DOM nodes.
+    if (this._inStack) {
+      this._popStack();
+    }
     this._previousActive = null;
+    this._wasOpen = false;
   }
 
   hostUpdated(): void {
     const open = this.opts.isOpen();
     if (open && !this._wasOpen) {
-      // Just opened — capture prior focus and focus the first item.
       this._previousActive = this._currentDocumentActive();
+      this._pushStack();
       this._focusFirstSoon();
     } else if (!open && this._wasOpen) {
-      // Just closed — restore prior focus when the previous element is
-      // still in the document and focusable.
+      this._popStack();
       const prev = this._previousActive as HTMLElement | null;
       this._previousActive = null;
       if (prev && prev.isConnected && typeof prev.focus === 'function') {
@@ -128,19 +166,34 @@ export class DialogA11yController implements ReactiveController {
     this._wasOpen = open;
   }
 
+  // ─── Stack management ─────────────────────────────────────────────
+
+  private _pushStack(): void {
+    if (this._inStack) return;
+    _openStack.push(this);
+    this._inStack = true;
+  }
+
+  private _popStack(): void {
+    const idx = _openStack.indexOf(this);
+    if (idx >= 0) _openStack.splice(idx, 1);
+    this._inStack = false;
+  }
+
+  // ─── Focusable discovery ──────────────────────────────────────────
+
   /** Focusable descendants in DOM order (visible only). */
   private _getFocusables(): HTMLElement[] {
     const scope = this.opts.getScope?.() ?? this.host.shadowRoot;
     if (!scope) return [];
     return Array.from(
-      scope.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      (scope as ParentNode).querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
     ).filter((el) => {
-      // `offsetParent === null` skips display:none / hidden ancestors.
-      // Inputs inside a closed `<details>` etc. would also be skipped.
       if (el.hasAttribute('aria-hidden')) return false;
       if (el.hidden) return false;
-      // `offsetParent` is null for fixed-position elements too — fall
-      // back to a getClientRects() check in that case.
+      // `offsetParent === null` skips display:none / hidden ancestors.
+      // For position:fixed elements (and descendants of them) we fall
+      // back to getClientRects() since their offsetParent is also null.
       if (el.offsetParent === null && el.getClientRects().length === 0) {
         return false;
       }
@@ -149,13 +202,14 @@ export class DialogA11yController implements ReactiveController {
   }
 
   private _focusFirstSoon(): void {
-    // Wait one microtask so Lit has finished rendering the open state.
+    // Wait one microtask so Lit has finished committing the open-state
+    // render to DOM before we measure focusables.
     queueMicrotask(() => {
       if (!this.opts.isOpen()) return;
-      // If focus is already inside the dialog (e.g., the user clicked an
-      // item that opened it via .focus()), respect that and don't move.
-      const inside = this.host.shadowRoot?.activeElement;
-      if (inside) return;
+      // If focus is already inside the dialog (e.g., the user clicked
+      // an element that opened it via .focus()), respect that.
+      const scope = this.opts.getScope?.() ?? this.host.shadowRoot;
+      if (scope && this._scopeContainsFocus(scope as ParentNode)) return;
       const items = this._getFocusables();
       if (items.length === 0) return;
       try {
@@ -166,17 +220,40 @@ export class DialogA11yController implements ReactiveController {
     });
   }
 
+  /** True when document focus is currently inside the given scope. */
+  private _scopeContainsFocus(scope: ParentNode): boolean {
+    // Walk through shadow roots from document.activeElement down.
+    let active: Element | null = document.activeElement;
+    while (active) {
+      if (active === scope) return true;
+      if ((scope as ShadowRoot).host === active) return true;
+      // For ParentNode that's an Element, .contains works; for a
+      // ShadowRoot, fall back to checking ancestor chain manually.
+      if ('contains' in scope && (scope as Element).contains(active)) {
+        return true;
+      }
+      const ar = active.shadowRoot;
+      if (ar && ar.activeElement) {
+        active = ar.activeElement;
+      } else {
+        break;
+      }
+    }
+    return false;
+  }
+
   private _currentDocumentActive(): Element | null {
     let active = document.activeElement;
-    // Walk into shadow roots to find the leaf-most focused element so
-    // we can restore focus accurately on close.
     while (active && active.shadowRoot && active.shadowRoot.activeElement) {
       active = active.shadowRoot.activeElement;
     }
     return active;
   }
 
-  private _onKeyDown = (e: KeyboardEvent): void => {
+  // ─── Keydown handler (called by the global dispatcher) ───────────
+
+  /** @internal — invoked by the shared document-level listener. */
+  _handleKeyDown(e: KeyboardEvent): void {
     if (!this.opts.isOpen()) return;
 
     if (e.key === 'Escape') {
@@ -192,23 +269,66 @@ export class DialogA11yController implements ReactiveController {
     if (items.length === 0) return;
     const first = items[0];
     const last = items[items.length - 1];
-    const active = this.host.shadowRoot?.activeElement as HTMLElement | null;
+    const scope = this.opts.getScope?.() ?? this.host.shadowRoot;
+    const focusedInScope = scope
+      ? this._findFocusedInScope(scope as ParentNode)
+      : null;
 
-    // No focused descendant yet — pull focus into the dialog.
-    if (!active || !this.host.shadowRoot?.contains(active)) {
+    if (!focusedInScope) {
+      // Focus is outside our scope — pull it in.
       e.preventDefault();
+      e.stopPropagation();
       (e.shiftKey ? last : first).focus();
       return;
     }
 
-    if (e.shiftKey && active === first) {
+    if (e.shiftKey && focusedInScope === first) {
       e.preventDefault();
+      e.stopPropagation();
       last.focus();
-    } else if (!e.shiftKey && active === last) {
+    } else if (!e.shiftKey && focusedInScope === last) {
       e.preventDefault();
+      e.stopPropagation();
       first.focus();
     }
-  };
+  }
+
+  /**
+   * Return the focused element inside the given scope, walking shadow
+   * roots if needed. Returns null when focus is outside the scope.
+   */
+  private _findFocusedInScope(scope: ParentNode): HTMLElement | null {
+    // Start at document.activeElement and walk into shadow roots.
+    let active: Element | null = document.activeElement;
+    while (active) {
+      // If active is inside scope (light DOM), match.
+      if (
+        scope === active ||
+        ('contains' in scope && (scope as Element).contains(active))
+      ) {
+        // If active has its own shadow root with a focused descendant,
+        // walk in.
+        if (active.shadowRoot && active.shadowRoot.activeElement) {
+          active = active.shadowRoot.activeElement;
+          continue;
+        }
+        return active as HTMLElement;
+      }
+      // If scope is a ShadowRoot whose host equals active, descend.
+      if ((scope as ShadowRoot).host === active) {
+        active = (scope as ShadowRoot).activeElement;
+        continue;
+      }
+      // Try descending into active's shadow root.
+      const ar = active.shadowRoot;
+      if (ar && ar.activeElement) {
+        active = ar.activeElement;
+      } else {
+        break;
+      }
+    }
+    return null;
+  }
 }
 
 /**
@@ -217,6 +337,10 @@ export class DialogA11yController implements ReactiveController {
  * Equivalent to `new DialogA11yController(host, opts)` but doesn't
  * return the instance, so callers don't need to store an unused field
  * (which trips `noUnusedLocals`).
+ *
+ * Call from the host's constructor. Multiple calls on the same host
+ * are supported — useful for pages that own several inline modals,
+ * each with its own `isOpen` predicate and scope.
  */
 export function attachDialogA11y(
   host: ReactiveControllerHost & HTMLElement,
