@@ -7684,18 +7684,20 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
             <div class="spinner"></div>
           </div>
         </div>
-      `;if(this._error&&!this._config)return j`
+      `;if(this._error&&!this._config){const e="No MeshCore devices found"===this._error;return j`
         <div class="panel">
           <div class="center-message">
             <div>
               <p>${this._error}</p>
               <p style="font-size: 12px; margin-top: 8px;">
-                Check that the MeshCore integration is loaded and connected.
+                ${e?j`Open <a href="/config/repairs">Settings &rarr; System &rarr; Repairs</a>
+                         for setup guidance, or add the MeshCore integration via
+                         <a href="/config/integrations">Settings &rarr; Devices &amp; Services</a>.`:"Check that the MeshCore integration is loaded and connected."}
               </p>
             </div>
           </div>
         </div>
-      `;const e=this._selectedDevice;return j`
+      `}const e=this._selectedDevice;return j`
       <div class="panel">
         <div class="panel-header">
           <div class="header-left">
