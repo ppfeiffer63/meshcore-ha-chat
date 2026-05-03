@@ -36,6 +36,7 @@ from custom_components.meshcore_chat import (
 )
 from custom_components.meshcore_chat.const import DOMAIN, MESHCORE_DOMAIN
 from custom_components.meshcore_chat import ws_api
+from pytest_homeassistant_custom_component.common import async_mock_service
 
 # ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -900,22 +901,73 @@ async def test_ws_mark_read_no_tracker(hass: HomeAssistant) -> None:
 # ─── Identity handlers (DESTRUCTIVE) ────────────────────────────────────
 
 
+# Phase 1 (Identity Surfaces and Rename Device Wiring) replaced these
+# handlers' bodies. The new flow delegates to the upstream meshcore
+# integration's ``execute_command`` service for ``import_private_key``
+# and ``reboot``, then triggers ``hass.config_entries.async_reload`` so
+# upstream's PR #169 pubkey-detection hook re-fires and migrates entity
+# IDs. Tests below mock the service and reload entry points (the
+# inter-integration boundary) and patch ``asyncio.sleep`` so the
+# 3-second post-reboot wait doesn't slow the suite.
+
+
+def _identity_change_mocks(hass, monkeypatch):
+    """Patch the inter-integration boundary used by the identity flow.
+
+    Sets up:
+      - a mock handler for ``meshcore.execute_command`` (the real
+        upstream service is not loaded in unit tests; without this the
+        handler raises ``ServiceNotFound``).
+      - a class-level patch of ``ConfigEntries.async_reload`` so we can
+        observe the reload trigger without actually reloading anything.
+      - a no-op patch of ``ws_api.asyncio.sleep`` so the 3-second
+        post-reboot wait doesn't slow the suite.
+
+    Returns ``(service_calls, reload_mock)``. ``service_calls`` is the
+    list of ``ServiceCall`` objects captured by ``async_mock_service``;
+    inspect ``call.data["command"]`` to assert what was sent.
+    """
+    service_calls = async_mock_service(hass, MESHCORE_DOMAIN, "execute_command")
+    reload_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        type(hass.config_entries), "async_reload", reload_mock
+    )
+    monkeypatch.setattr(ws_api.asyncio, "sleep", AsyncMock())
+    return service_calls, reload_mock
+
+
 async def test_ws_regenerate_identity_happy(
-    hass: HomeAssistant, coordinator: MagicMock
+    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
 ) -> None:
-    coordinator.api.mesh_core.commands.regenerate_key = AsyncMock()
-    coordinator.api.self_info = {"pubkey": "newkey1234"}
+    """Regenerate generates a fresh key, calls execute_command, reboots, reloads."""
+    service_calls, reload_mock = _identity_change_mocks(hass, monkeypatch)
     conn = _Connection()
     await _call_ws(ws_api.ws_regenerate_identity, hass, conn, {"id": 1})
     payload = conn.results[0][1]
-    assert payload["success"] and payload["new_pubkey"] == "newkey1234"
+    assert payload["success"] is True
+    assert "Device rebooted" in payload["warning"]
+    # Two execute_command calls: import_private_key <hex> and reboot.
+    assert len(service_calls) == 2
+    cmd0 = service_calls[0].data["command"]
+    assert cmd0.startswith("import_private_key ")
+    # The seed is 128 hex chars (32-byte seed || 32-byte verify_key).
+    seed = cmd0.split(" ", 1)[1]
+    assert len(seed) == 128 and all(c in "0123456789abcdef" for c in seed)
+    assert service_calls[1].data["command"] == "reboot"
+    assert all(c.data.get("entry_id") == "meshcore_entry" for c in service_calls)
+    reload_mock.assert_awaited_once()
+    assert reload_mock.await_args.args[0] == "meshcore_entry"
 
 
 async def test_ws_regenerate_identity_handles_failure(
-    hass: HomeAssistant, coordinator: MagicMock
+    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
 ) -> None:
-    coordinator.api.mesh_core.commands.regenerate_key = AsyncMock(
-        side_effect=ConnectionError("disconnected")
+    """Service-call ConnectionError surfaces via _ws_send_error_safe → not_connected."""
+    _identity_change_mocks(hass, monkeypatch)
+    # Override services.async_call class method to raise ConnectionError.
+    monkeypatch.setattr(
+        type(hass.services), "async_call",
+        AsyncMock(side_effect=ConnectionError("disconnected")),
     )
     conn = _Connection()
     await _call_ws(ws_api.ws_regenerate_identity, hass, conn, {"id": 1})
@@ -930,19 +982,89 @@ async def test_ws_regenerate_identity_error_no_coordinator(
     assert conn.errors[0][1] == "not_found"
 
 
-async def test_ws_import_identity_happy(
-    hass: HomeAssistant, coordinator: MagicMock
+async def test_ws_import_identity_happy_128_hex(
+    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
 ) -> None:
-    coordinator.api.mesh_core.commands.import_key = AsyncMock()
-    coordinator.api.self_info = {"pubkey": "importedkey"}
+    """Valid 128-char hex passes through to execute_command unchanged."""
+    service_calls, reload_mock = _identity_change_mocks(hass, monkeypatch)
+    valid_seed = "ab" * 64  # 128 hex chars
     conn = _Connection()
     await _call_ws(
-        ws_api.ws_import_identity,
-        hass,
-        conn,
-        {"id": 1, "private_key": "deadbeef"},
+        ws_api.ws_import_identity, hass, conn,
+        {"id": 1, "private_key": valid_seed},
     )
-    assert conn.results[0][1]["pubkey"] == "importedkey"
+    payload = conn.results[0][1]
+    assert payload["success"] is True
+    assert service_calls[0].data["command"] == f"import_private_key {valid_seed}"
+    reload_mock.assert_awaited_once()
+    assert reload_mock.await_args.args[0] == "meshcore_entry"
+
+
+async def test_ws_import_identity_happy_64_hex_expands(
+    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+) -> None:
+    """Valid 64-char raw seed is deterministically expanded to 128 hex."""
+    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
+    raw_seed = "11" * 32  # 64 hex chars
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_import_identity, hass, conn,
+        {"id": 1, "private_key": raw_seed},
+    )
+    expanded = service_calls[0].data["command"].split(" ", 1)[1]
+    # Expansion is deterministic for a given seed; head matches input,
+    # tail is the derived verify_key.
+    assert len(expanded) == 128
+    assert expanded.startswith(raw_seed)
+
+
+async def test_ws_import_identity_rejects_short_input(
+    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+) -> None:
+    """Empty / 1-char / 16-char inputs all produce invalid_key_length error."""
+    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
+    for bad in ("", "x", "abc", "1234567890abcdef"):  # 0, 1, 3, 16 chars
+        conn = _Connection()
+        await _call_ws(
+            ws_api.ws_import_identity, hass, conn,
+            {"id": 1, "private_key": bad},
+        )
+        assert conn.errors[0][1] == "invalid", f"input {bad!r} should be invalid"
+        assert "64 or 128" in conn.errors[0][2]
+    assert len(service_calls) == 0  # never reached the service call
+
+
+async def test_ws_import_identity_rejects_non_hex(
+    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+) -> None:
+    """Non-hex characters in a length-correct string produce invalid_key_hex."""
+    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
+    bad = "z" * 64  # length-correct, non-hex
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_import_identity, hass, conn,
+        {"id": 1, "private_key": bad},
+    )
+    assert conn.errors[0][1] == "invalid"
+    assert "hex" in conn.errors[0][2].lower()
+    assert len(service_calls) == 0
+
+
+async def test_ws_import_identity_strips_whitespace(
+    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+) -> None:
+    """Internal whitespace is stripped before length/hex validation."""
+    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
+    # 128 hex chars with embedded spaces and newlines.
+    valid = "ab" * 64
+    spaced = " ".join(valid[i:i + 8] for i in range(0, len(valid), 8))
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_import_identity, hass, conn,
+        {"id": 1, "private_key": spaced + "\n"},
+    )
+    assert conn.results[0][1]["success"] is True
+    assert service_calls[0].data["command"] == f"import_private_key {valid}"
 
 
 async def test_ws_import_identity_error_no_coordinator(
@@ -951,7 +1073,9 @@ async def test_ws_import_identity_error_no_coordinator(
     conn = _Connection()
     await _call_ws(
         ws_api.ws_import_identity, hass, conn,
-        {"id": 1, "private_key": "x"},
+        # Non-empty payload — coordinator-check fires first regardless
+        # of payload validity.
+        {"id": 1, "private_key": "ab" * 64},
     )
     assert conn.errors[0][1] == "not_found"
 
