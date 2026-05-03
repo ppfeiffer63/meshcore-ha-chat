@@ -1378,10 +1378,24 @@ export class SettingsPage extends LitElement {
 
   private _handleNameSave() {
     const newName = this._editValues['name'];
-    if (newName === undefined || newName === this._deviceConfig?.name) return;
+    const oldName = this._deviceConfig?.name;
+    if (newName === undefined || newName === oldName) return;
+    // Phase 2 (F06): the dialog now describes what the migration
+    // actually does. Server-side `_migrate_entity_ids_name_suffix` in
+    // ws_api.py rewrites entity_ids ending in `_<sanitized-old>` to end
+    // in `_<sanitized-new>`. The local `sanitize` mirror approximates
+    // meshcore-ha's `utils.py:sanitize_name` closely enough for the
+    // preview — the server-side migration uses the canonical sanitize.
+    const sanitize = (s: string) =>
+      (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const oldSuffix = sanitize(oldName ?? '');
+    const newSuffix = sanitize(String(newName));
     this._confirmAction = {
       title: 'Rename Device',
-      message: 'Changing the device name will change all entity IDs for this device. Any automations, scripts, or dashboards referencing current entity IDs will need to be updated. Continue?',
+      message:
+        `Renaming the device will rename all entity IDs ending in _${oldSuffix} to _${newSuffix}. ` +
+        `Any automations, scripts, or dashboards referencing entity IDs by the old name will need updating. ` +
+        `A repair issue will list every renamed entity. Continue?`,
       onConfirm: async () => {
         await this._handleApply('device-name');
       },
