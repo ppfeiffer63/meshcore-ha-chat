@@ -1475,6 +1475,63 @@ async def ws_mark_read(hass, connection, msg):
 
 
 # ─── PHASE 4: Identity Management ────────────────────────────────────────
+#
+# The identity flow delegates to upstream meshcore-ha's existing facilities
+# rather than reinventing the SDK contract chat-side:
+#
+# 1. ``meshcore.execute_command import_private_key <hex>`` — services.py
+#    handles ``bytes.fromhex`` conversion and calls
+#    ``commands.import_private_key(b"\\x18" + key)``. Membership in
+#    ``_SELF_INFO_COMMANDS`` triggers a post-call ``send_appstart`` cache
+#    refresh (services.py:35, 656-664).
+# 2. ``meshcore.execute_command reboot`` — the firmware only switches
+#    identities on the next boot.
+# 3. Brief ``asyncio.sleep`` while transport-layer reconnect completes
+#    (SDK ``connection_manager`` handles the reconnect itself).
+# 4. ``hass.config_entries.async_reload(meshcore_entry_id)`` — fires the
+#    pubkey-detection hook in upstream ``async_setup_entry``
+#    (meshcore-ha PR #169, ``__init__.py:319-348``), which calls
+#    ``_migrate_entity_ids(old_prefix, new_prefix)`` and creates the
+#    ``pubkey_changed_<entry_id>`` repair issue automatically.
+#
+# Forensics: ``docs/Forensics - Identity Surfaces and Rename Device.md``
+# (F01-F05, F07-F08).
+
+
+async def _do_identity_change(hass, meshcore_entry_id, seed_hex):
+    """Apply seed → reboot → wait for reconnect → reload entry.
+
+    The entry reload triggers meshcore-ha's ``async_setup_entry``, which
+    detects the new pubkey via PR #169's hook and runs
+    ``_migrate_entity_ids(old_prefix, new_prefix)`` automatically.
+    """
+    # 1. Push the new key via the existing service path (handles hex→bytes
+    #    conversion, the SDK call, and the self_info cache refresh).
+    await hass.services.async_call(
+        MESHCORE_DOMAIN,
+        "execute_command",
+        {"command": f"import_private_key {seed_hex}", "entry_id": meshcore_entry_id},
+        blocking=True,
+    )
+
+    # 2. Reboot — the new key only takes effect on next boot.
+    await hass.services.async_call(
+        MESHCORE_DOMAIN,
+        "execute_command",
+        {"command": "reboot", "entry_id": meshcore_entry_id},
+        blocking=True,
+    )
+
+    # 3. Wait for the device to come back. The SDK's connection_manager
+    #    handles transport-level reconnect; we just need to not race the
+    #    reload. 3 seconds is a placeholder — see proposal Risk R1.
+    # TODO: replace with EventType.CONNECTED await once the SDK exposes
+    # a clean reconnect-completed signal.
+    await asyncio.sleep(3.0)
+
+    # 4. Reload the config entry. PR #169's async_setup_entry hook detects
+    #    the new pubkey and migrates entity IDs automatically.
+    await hass.config_entries.async_reload(meshcore_entry_id)
 
 
 @websocket_api.websocket_command(
@@ -1486,21 +1543,32 @@ async def ws_mark_read(hass, connection, msg):
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_regenerate_identity(hass, connection, msg):
-    """Regenerate device identity (new public key)."""
+    """Regenerate identity by host-generating a fresh keypair and importing it."""
     coordinator = _get_coordinator(hass, msg.get("entry_id"))
     if not coordinator:
-        connection.send_error(msg["id"], "not_found", "No MeshCore coordinator found")
+        connection.send_error(msg["id"], "not_found", _t("no_meshcore_coordinator"))
         return
 
     try:
-        await coordinator.api.mesh_core.commands.regenerate_key()
-        self_info = getattr(coordinator.api, "self_info", {}) or {}
-        new_pubkey = self_info.get("pubkey", "unknown")
-        connection.send_result(msg["id"], {
-            "success": True,
-            "new_pubkey": new_pubkey,
-            "warning": "All contacts must re-add this device with the new public key.",
-        })
+        # Host-side generate Ed25519 expanded seed (32-byte seed || 32-byte
+        # verify_key). PyNaCl uses libsodium → /dev/urandom on Linux.
+        from nacl.signing import SigningKey
+
+        sk = SigningKey.generate()
+        seed_hex = (bytes(sk) + bytes(sk.verify_key)).hex()
+        await _do_identity_change(
+            hass, coordinator.config_entry.entry_id, seed_hex
+        )
+        connection.send_result(
+            msg["id"],
+            {
+                "success": True,
+                "warning": (
+                    "Device rebooted with new identity. Entity IDs migrated. "
+                    "All contacts must re-add this device."
+                ),
+            },
+        )
     except Exception as ex:
         _ws_send_error_safe(
             connection, msg["id"], ex, handler="ws_regenerate_identity"
@@ -1517,19 +1585,47 @@ async def ws_regenerate_identity(hass, connection, msg):
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_import_identity(hass, connection, msg):
-    """Import a private key to restore identity."""
+    """Import a hex-encoded private key, reboot device, reload config entry."""
     coordinator = _get_coordinator(hass, msg.get("entry_id"))
     if not coordinator:
-        connection.send_error(msg["id"], "not_found", "No MeshCore coordinator found")
+        connection.send_error(msg["id"], "not_found", _t("no_meshcore_coordinator"))
         return
 
+    # Strip whitespace anywhere in the input — paste-friendly.
+    raw = msg["private_key"].strip().replace(" ", "").replace("\n", "")
+    if len(raw) not in (64, 128) or len(raw) % 2 != 0:
+        connection.send_error(msg["id"], "invalid", _t("invalid_key_length"))
+        return
     try:
-        await coordinator.api.mesh_core.commands.import_key(msg["private_key"])
-        self_info = getattr(coordinator.api, "self_info", {}) or {}
-        connection.send_result(msg["id"], {
-            "success": True,
-            "pubkey": self_info.get("pubkey", "unknown"),
-        })
+        bytes.fromhex(raw)
+    except ValueError:
+        connection.send_error(msg["id"], "invalid", _t("invalid_key_hex"))
+        return
+
+    # Expand 32-byte raw seed to 64-byte expanded form if needed. The
+    # firmware accepts only the expanded form (seed || verify_key); a
+    # caller pasting the raw seed alone gets it deterministically expanded
+    # to the matching verify_key — see proposal Risk R4.
+    if len(raw) == 64:
+        from nacl.signing import SigningKey
+
+        sk = SigningKey(bytes.fromhex(raw))
+        raw = (bytes(sk) + bytes(sk.verify_key)).hex()
+
+    try:
+        await _do_identity_change(
+            hass, coordinator.config_entry.entry_id, raw
+        )
+        connection.send_result(
+            msg["id"],
+            {
+                "success": True,
+                "warning": (
+                    "Device rebooted with new identity. Entity IDs migrated. "
+                    "All contacts must re-add this device."
+                ),
+            },
+        )
     except Exception as ex:
         _ws_send_error_safe(
             connection, msg["id"], ex, handler="ws_import_identity"
