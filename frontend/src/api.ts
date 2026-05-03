@@ -501,21 +501,21 @@ export async function markConversationRead(
 
 export async function regenerateIdentity(
   hass: HomeAssistant, entryId?: string,
-): Promise<{ success: boolean; new_pubkey?: string; warning?: string }> {
+): Promise<{ success: boolean; warning?: string }> {
   try {
     const msg: Record<string, unknown> = { type: 'meshcore_chat/regenerate_identity' };
     if (entryId) msg.entry_id = entryId;
-    return await hass.callWS<{ success: boolean; new_pubkey?: string; warning?: string }>(msg);
+    return await hass.callWS<{ success: boolean; warning?: string }>(msg);
   } catch { return { success: false }; }
 }
 
 export async function importIdentity(
   hass: HomeAssistant, privateKey: string, entryId?: string,
-): Promise<{ success: boolean; pubkey?: string }> {
+): Promise<{ success: boolean; warning?: string }> {
   try {
     const msg: Record<string, unknown> = { type: 'meshcore_chat/import_identity', private_key: privateKey };
     if (entryId) msg.entry_id = entryId;
-    return await hass.callWS<{ success: boolean; pubkey?: string }>(msg);
+    return await hass.callWS<{ success: boolean; warning?: string }>(msg);
   } catch { return { success: false }; }
 }
 
