@@ -23,6 +23,7 @@ load altogether.
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -51,6 +52,11 @@ class _Connection:
     def __init__(self) -> None:
         self.results: list[tuple[int, Any]] = []
         self.errors: list[tuple[int, str, str]] = []
+        # Streaming-WS event_messages emitted via ``connection.send_message
+        # (websocket_api.event_message(msg_id, payload))``. Each entry
+        # captured here is the ``payload`` dict (HA's wire wrapper is
+        # ``{"id": msg_id, "type": "event", "event": payload}``).
+        self.event_messages: list[Any] = []
         # Admin-by-default — a few destructive handlers gate on this
         # via @require_admin, but our _call_ws helper bypasses that
         # decorator, so this is mostly for completeness.
@@ -61,6 +67,16 @@ class _Connection:
 
     def send_error(self, msg_id: int, code: str, message: str) -> None:
         self.errors.append((msg_id, code, message))
+
+    def send_message(self, msg: Any) -> None:
+        # ``websocket_api.event_message(msg_id, payload)`` returns
+        # ``{"id": msg_id, "type": "event", "event": payload}``. Strip
+        # the wire envelope so tests can assert on the inner payload
+        # directly.
+        if isinstance(msg, dict) and msg.get("type") == "event" and "event" in msg:
+            self.event_messages.append(msg["event"])
+        else:
+            self.event_messages.append(msg)
 
 
 async def _call_ws(handler, hass, conn, msg) -> None:
@@ -901,77 +917,349 @@ async def test_ws_mark_read_no_tracker(hass: HomeAssistant) -> None:
 # ─── Identity handlers (DESTRUCTIVE) ────────────────────────────────────
 
 
-# Phase 1 (Identity Surfaces and Rename Device Wiring) replaced these
-# handlers' bodies. The new flow delegates to the upstream meshcore
-# integration's ``execute_command`` service for ``import_private_key``
-# and ``reboot``, then triggers ``hass.config_entries.async_reload`` so
-# upstream's PR #169 pubkey-detection hook re-fires and migrates entity
-# IDs. Tests below mock the service and reload entry points (the
-# inter-integration boundary) and patch ``asyncio.sleep`` so the
-# 3-second post-reboot wait doesn't slow the suite.
+# Phase 1.1 (post-deploy 2026-05-03 forensics F09-F11) replaced the
+# Phase 1 service-delegation path with direct SDK calls + streaming
+# event_messages. Tests below assert:
+#
+#  - the new ``_seed_to_meshcore_priv`` helper produces firmware-native
+#    expanded clamped secret bytes (T1.10);
+#  - the streaming flow happy path emits the expected step sequence and
+#    self_info refresh between import and reboot (T1.11, R10);
+#  - firmware ``EventType.ERROR`` raises ``IdentityImportError`` and
+#    surfaces via ``send_error("import_rejected", ...)`` without
+#    proceeding to reboot/reload (T1.12, F10);
+#  - the post-reload pubkey-verify guard surfaces a stale-pubkey reload
+#    as ``send_error("import_rejected", ...)`` rather than a false
+#    success (R8 false-positive guard).
+#
+# The validation surfaces (length / hex / whitespace / no-coordinator)
+# from Phase 1 are preserved; only the underlying execute_command
+# delegation has been swapped for direct SDK invocation.
 
 
-def _identity_change_mocks(hass, monkeypatch):
-    """Patch the inter-integration boundary used by the identity flow.
+# Helper: a stand-in for ``meshcore.events.EventType``. The handler
+# imports lazily inside ``_do_identity_change`` so we patch
+# ``sys.modules["meshcore.events"]`` to keep tests independent of
+# whether the real meshcore package is installed in the unit-test env.
+class _FakeEventType:
+    ERROR = "error_event_type"
+    OK = "ok_event_type"
+
+
+class _FakeEvent:
+    """Minimal stand-in for an SDK ``Event``.
+
+    Mirrors the two attributes ``_do_identity_change`` reads:
+    ``.type`` and ``.payload``.
+    """
+
+    def __init__(self, type_, payload=None):
+        self.type = type_
+        self.payload = payload or {}
+
+
+@pytest.fixture
+def patched_event_type(monkeypatch):
+    """Inject a fake ``meshcore.events.EventType`` so the handler's
+    inline ``from meshcore.events import EventType`` resolves to a
+    deterministic stand-in regardless of whether the real meshcore
+    package is installed in the test environment.
+    """
+    import types
+    fake_module = types.ModuleType("meshcore.events")
+    fake_module.EventType = _FakeEventType
+    monkeypatch.setitem(sys.modules, "meshcore.events", fake_module)
+    # Also publish the parent package so the import doesn't trip on a
+    # missing ``meshcore`` shell.
+    if "meshcore" not in sys.modules:
+        meshcore_shell = types.ModuleType("meshcore")
+        monkeypatch.setitem(sys.modules, "meshcore", meshcore_shell)
+    return _FakeEventType
+
+
+def _identity_streaming_mocks(
+    hass, coordinator, monkeypatch,
+    *,
+    new_pubkey="cafef00d" * 8,
+    import_event=None,
+    reload_changes_pubkey=True,
+):
+    """Patch the SDK-direct path used by the streaming identity flow.
 
     Sets up:
-      - a mock handler for ``meshcore.execute_command`` (the real
-        upstream service is not loaded in unit tests; without this the
-        handler raises ``ServiceNotFound``).
-      - a class-level patch of ``ConfigEntries.async_reload`` so we can
-        observe the reload trigger without actually reloading anything.
-      - a no-op patch of ``ws_api.asyncio.sleep`` so the 3-second
-        post-reboot wait doesn't slow the suite.
 
-    Returns ``(service_calls, reload_mock)``. ``service_calls`` is the
-    list of ``ServiceCall`` objects captured by ``async_mock_service``;
-    inspect ``call.data["command"]`` to assert what was sent.
+    - ``coord.api.mesh_core.commands.import_private_key`` returning the
+      caller-supplied ``import_event`` (defaults to OK, no payload).
+    - ``coord.api.mesh_core.commands.send_appstart`` and
+      ``coord.api._cache_self_info_event`` as observable mocks (R10).
+    - ``coord.api.mesh_core.commands.reboot`` as an awaitable mock.
+    - A class-level patch of ``ConfigEntries.async_reload`` whose
+      side-effect updates ``coord.pubkey`` to ``new_pubkey`` when
+      ``reload_changes_pubkey`` is True; otherwise the pubkey stays at
+      its original value to exercise the verify-failed guard.
+    - A no-op patch of ``ws_api.asyncio.sleep`` so the post-reboot
+      wait doesn't slow the suite.
+
+    Returns the ``reload_mock`` so callers can introspect.
     """
-    service_calls = async_mock_service(hass, MESHCORE_DOMAIN, "execute_command")
-    reload_mock = AsyncMock(return_value=True)
+    if import_event is None:
+        import_event = _FakeEvent(_FakeEventType.OK, {})
+
+    coordinator.api.mesh_core.commands.import_private_key = AsyncMock(
+        return_value=import_event
+    )
+    coordinator.api.mesh_core.commands.send_appstart = AsyncMock(
+        return_value=_FakeEvent(_FakeEventType.OK, {})
+    )
+    coordinator.api._cache_self_info_event = MagicMock()
+    coordinator.api.mesh_core.commands.reboot = AsyncMock(return_value=None)
+
+    async def _reload(_entry_id):
+        if reload_changes_pubkey:
+            coordinator.pubkey = new_pubkey
+        return True
+
+    reload_mock = AsyncMock(side_effect=_reload)
     monkeypatch.setattr(
         type(hass.config_entries), "async_reload", reload_mock
     )
     monkeypatch.setattr(ws_api.asyncio, "sleep", AsyncMock())
-    return service_calls, reload_mock
+    return reload_mock
 
 
-async def test_ws_regenerate_identity_happy(
-    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+# ─── T1.10 — _seed_to_meshcore_priv key-format helper ───────────────────
+
+
+def test_seed_to_meshcore_priv_clamping_pattern() -> None:
+    """SHA-512 expansion + RFC 8032 §5.1.5 clamping bit pattern."""
+    out = ws_api._seed_to_meshcore_priv(b"\x42" * 32)
+    assert len(out) == 64
+    # Lowest 3 bits of byte[0] are clear (×8 multiplier).
+    assert out[0] & 7 == 0
+    # Top bit of byte[31] is clear; bit 6 is set.
+    assert out[31] >> 7 == 0
+    assert (out[31] >> 6) & 1 == 1
+
+
+def test_seed_to_meshcore_priv_rejects_wrong_length() -> None:
+    """31- and 33-byte inputs raise ValueError before hashing."""
+    for bad in (b"", b"\x00" * 31, b"\x00" * 33, b"\x00" * 64):
+        with pytest.raises(ValueError) as excinfo:
+            ws_api._seed_to_meshcore_priv(bad)
+        assert "32 bytes" in str(excinfo.value)
+
+
+def test_seed_to_meshcore_priv_is_deterministic() -> None:
+    """Identical seed → identical 64-byte output across calls."""
+    seed = bytes(range(32))
+    a = ws_api._seed_to_meshcore_priv(seed)
+    b = ws_api._seed_to_meshcore_priv(seed)
+    assert a == b
+
+
+def test_seed_to_meshcore_priv_differs_for_different_seeds() -> None:
+    """Different seeds produce different expanded forms (basic sanity)."""
+    a = ws_api._seed_to_meshcore_priv(b"\x00" * 32)
+    b = ws_api._seed_to_meshcore_priv(b"\x01" * 32)
+    assert a != b
+
+
+# ─── T1.11 — streaming flow happy path (Regenerate) ─────────────────────
+
+
+async def test_ws_regenerate_identity_streaming_happy(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
 ) -> None:
-    """Regenerate generates a fresh key, calls execute_command, reboots, reloads."""
-    service_calls, reload_mock = _identity_change_mocks(hass, monkeypatch)
+    """Streaming flow emits the expected step sequence and terminates with success.
+
+    Asserts (T1.11 / R10):
+
+    - ``send_message`` event_message stream order is generating →
+      importing → rebooting → reconnecting → reloading → verifying →
+      done.
+    - ``send_appstart`` and ``_cache_self_info_event`` fire between
+      import and reboot (R10 — the inline self_info refresh required
+      by abandoning the service-delegation path).
+    - ``send_result`` carries ``success: True`` (the typed payload
+      itself rides on the ``done`` event_message).
+    - The final ``done`` event carries ``old_pubkey`` (pre-reload) and
+      ``new_pubkey`` (post-reload).
+    """
+    old_pubkey = coordinator.pubkey  # set by _make_coordinator
+    new_pubkey = "cafef00d" * 8
+    reload_mock = _identity_streaming_mocks(
+        hass, coordinator, monkeypatch, new_pubkey=new_pubkey
+    )
+
     conn = _Connection()
     await _call_ws(ws_api.ws_regenerate_identity, hass, conn, {"id": 1})
-    payload = conn.results[0][1]
-    assert payload["success"] is True
-    assert "Device rebooted" in payload["warning"]
-    # Two execute_command calls: import_private_key <hex> and reboot.
-    assert len(service_calls) == 2
-    cmd0 = service_calls[0].data["command"]
-    assert cmd0.startswith("import_private_key ")
-    # The seed is 128 hex chars (32-byte seed || 32-byte verify_key).
-    seed = cmd0.split(" ", 1)[1]
-    assert len(seed) == 128 and all(c in "0123456789abcdef" for c in seed)
-    assert service_calls[1].data["command"] == "reboot"
-    assert all(c.data.get("entry_id") == "meshcore_entry" for c in service_calls)
+
+    # Terminal: send_result fires after the done event.
+    assert len(conn.results) == 1
+    assert conn.results[0][1] == {"success": True}
+    assert conn.errors == []
+
+    # Streaming events: in order, with terminal "done" carrying the data.
+    steps = [evt["step"] for evt in conn.event_messages]
+    assert steps == [
+        "generating", "importing", "rebooting",
+        "reconnecting", "reloading", "verifying", "done",
+    ]
+    done_evt = conn.event_messages[-1]
+    assert done_evt["success"] is True
+    assert done_evt["old_pubkey"] == old_pubkey
+    assert done_evt["new_pubkey"] == new_pubkey
+    assert "Device rebooted" in done_evt["warning"]
+
+    # SDK call sequence: import_private_key called with 64-byte expanded seed.
+    import_call = coordinator.api.mesh_core.commands.import_private_key
+    import_call.assert_awaited_once()
+    seed_arg = import_call.await_args.args[0]
+    assert isinstance(seed_arg, bytes) and len(seed_arg) == 64
+
+    # R10: self_info refresh fires between import and reboot.
+    coordinator.api.mesh_core.commands.send_appstart.assert_awaited_once()
+    coordinator.api._cache_self_info_event.assert_called_once()
+
+    # Reboot fires; then reload triggers the verify step.
+    coordinator.api.mesh_core.commands.reboot.assert_awaited_once()
     reload_mock.assert_awaited_once()
     assert reload_mock.await_args.args[0] == "meshcore_entry"
 
 
-async def test_ws_regenerate_identity_handles_failure(
-    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+async def test_ws_import_identity_streaming_happy_128_hex(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
 ) -> None:
-    """Service-call ConnectionError surfaces via _ws_send_error_safe → not_connected."""
-    _identity_change_mocks(hass, monkeypatch)
-    # Override services.async_call class method to raise ConnectionError.
-    monkeypatch.setattr(
-        type(hass.services), "async_call",
-        AsyncMock(side_effect=ConnectionError("disconnected")),
+    """128-char input is treated as already firmware-native; passed as 64 bytes verbatim."""
+    _identity_streaming_mocks(hass, coordinator, monkeypatch)
+    # 128 hex = 64 bytes; head + tail differ so we can assert pass-through.
+    raw_hex = "ab" * 32 + "cd" * 32
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_import_identity, hass, conn,
+        {"id": 1, "private_key": raw_hex},
     )
+    assert conn.results[0][1] == {"success": True}
+    seed_arg = coordinator.api.mesh_core.commands.import_private_key.await_args.args[0]
+    assert seed_arg == bytes.fromhex(raw_hex)
+
+
+async def test_ws_import_identity_streaming_happy_64_hex_expands(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
+) -> None:
+    """64-char input is treated as raw 32-byte seed and SHA-512-expanded host-side."""
+    _identity_streaming_mocks(hass, coordinator, monkeypatch)
+    raw_seed_hex = "11" * 32  # 64 hex chars = 32 bytes
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_import_identity, hass, conn,
+        {"id": 1, "private_key": raw_seed_hex},
+    )
+    assert conn.results[0][1] == {"success": True}
+    seed_arg = coordinator.api.mesh_core.commands.import_private_key.await_args.args[0]
+    expected = ws_api._seed_to_meshcore_priv(bytes.fromhex(raw_seed_hex))
+    assert seed_arg == expected
+    assert len(seed_arg) == 64
+
+
+# ─── T1.12 — streaming flow firmware-error path ─────────────────────────
+
+
+async def test_ws_regenerate_identity_streaming_firmware_error(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
+) -> None:
+    """Firmware ERROR event short-circuits the chain with import_rejected.
+
+    Asserts (T1.12 / F10):
+
+    - ``import_private_key`` returns Event(type=ERROR,
+      payload={"code_string": "ERR_CODE_ILLEGAL_ARG"}).
+    - Only ``generating`` and ``importing`` step events are emitted —
+      reboot / reconnecting / reloading / verifying are NOT.
+    - ``send_error`` is called with code ``import_rejected`` and the
+      firmware code_string in the message.
+    - ``reboot`` and ``async_reload`` mocks are NOT called — the chain
+      genuinely stopped at the firmware rejection.
+    """
+    error_event = _FakeEvent(
+        _FakeEventType.ERROR,
+        {"code_string": "ERR_CODE_ILLEGAL_ARG", "error_code": 6},
+    )
+    reload_mock = _identity_streaming_mocks(
+        hass, coordinator, monkeypatch, import_event=error_event
+    )
+
     conn = _Connection()
     await _call_ws(ws_api.ws_regenerate_identity, hass, conn, {"id": 1})
-    assert conn.errors[0][1] == "not_connected"
+
+    # Terminal: send_error, no send_result.
+    assert conn.results == []
+    assert len(conn.errors) == 1
+    msg_id, code, message = conn.errors[0]
+    assert (msg_id, code) == (1, "import_rejected")
+    assert "ERR_CODE_ILLEGAL_ARG" in message
+
+    # Only the pre-failure steps were emitted.
+    steps = [evt["step"] for evt in conn.event_messages]
+    assert steps == ["generating", "importing"]
+
+    # Reboot / reload genuinely never fired — F10 was the chain
+    # silently continuing after a firmware ERROR.
+    coordinator.api.mesh_core.commands.reboot.assert_not_awaited()
+    reload_mock.assert_not_awaited()
+
+
+# ─── R8 — verify-after-reload guard surfaces stale pubkey ───────────────
+
+
+async def test_ws_regenerate_identity_verify_failed_when_pubkey_unchanged(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
+) -> None:
+    """Reload completes but pubkey stays old → verify_failed surfaced.
+
+    Belt-and-suspenders for the "OK + reload + same pubkey" edge case
+    where the firmware ack'd the import but failed to persist.
+    """
+    _identity_streaming_mocks(
+        hass, coordinator, monkeypatch, reload_changes_pubkey=False
+    )
+
+    conn = _Connection()
+    await _call_ws(ws_api.ws_regenerate_identity, hass, conn, {"id": 1})
+
+    # The full streaming sequence runs (import OK → reboot → reload
+    # all complete), but the verify step trips and surfaces an error.
+    assert conn.results == []
+    assert len(conn.errors) == 1
+    _, code, message = conn.errors[0]
+    assert code == "import_rejected"
+    assert "pubkey unchanged" in message.lower()
+
+    # All six in-flight steps emitted; the "done" event was NOT — the
+    # verify step raised before reaching the success branch.
+    steps = [evt["step"] for evt in conn.event_messages]
+    assert steps == [
+        "generating", "importing", "rebooting",
+        "reconnecting", "reloading", "verifying",
+    ]
+
+
+# ─── Validation surfaces (preserved from Phase 1) ──────────────────────
 
 
 async def test_ws_regenerate_identity_error_no_coordinator(
@@ -982,48 +1270,15 @@ async def test_ws_regenerate_identity_error_no_coordinator(
     assert conn.errors[0][1] == "not_found"
 
 
-async def test_ws_import_identity_happy_128_hex(
-    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
-) -> None:
-    """Valid 128-char hex passes through to execute_command unchanged."""
-    service_calls, reload_mock = _identity_change_mocks(hass, monkeypatch)
-    valid_seed = "ab" * 64  # 128 hex chars
-    conn = _Connection()
-    await _call_ws(
-        ws_api.ws_import_identity, hass, conn,
-        {"id": 1, "private_key": valid_seed},
-    )
-    payload = conn.results[0][1]
-    assert payload["success"] is True
-    assert service_calls[0].data["command"] == f"import_private_key {valid_seed}"
-    reload_mock.assert_awaited_once()
-    assert reload_mock.await_args.args[0] == "meshcore_entry"
-
-
-async def test_ws_import_identity_happy_64_hex_expands(
-    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
-) -> None:
-    """Valid 64-char raw seed is deterministically expanded to 128 hex."""
-    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
-    raw_seed = "11" * 32  # 64 hex chars
-    conn = _Connection()
-    await _call_ws(
-        ws_api.ws_import_identity, hass, conn,
-        {"id": 1, "private_key": raw_seed},
-    )
-    expanded = service_calls[0].data["command"].split(" ", 1)[1]
-    # Expansion is deterministic for a given seed; head matches input,
-    # tail is the derived verify_key.
-    assert len(expanded) == 128
-    assert expanded.startswith(raw_seed)
-
-
 async def test_ws_import_identity_rejects_short_input(
-    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+    hass: HomeAssistant, coordinator: MagicMock,
 ) -> None:
-    """Empty / 1-char / 16-char inputs all produce invalid_key_length error."""
-    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
-    for bad in ("", "x", "abc", "1234567890abcdef"):  # 0, 1, 3, 16 chars
+    """Empty / 1-char / 16-char inputs all produce invalid_key_length error.
+
+    Validation fires before the coordinator's SDK is touched, so no
+    streaming mocks are needed.
+    """
+    for bad in ("", "x", "abc", "1234567890abcdef"):
         conn = _Connection()
         await _call_ws(
             ws_api.ws_import_identity, hass, conn,
@@ -1031,14 +1286,13 @@ async def test_ws_import_identity_rejects_short_input(
         )
         assert conn.errors[0][1] == "invalid", f"input {bad!r} should be invalid"
         assert "64 or 128" in conn.errors[0][2]
-    assert len(service_calls) == 0  # never reached the service call
+    coordinator.api.mesh_core.commands.import_private_key.assert_not_called()
 
 
 async def test_ws_import_identity_rejects_non_hex(
-    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+    hass: HomeAssistant, coordinator: MagicMock,
 ) -> None:
     """Non-hex characters in a length-correct string produce invalid_key_hex."""
-    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
     bad = "z" * 64  # length-correct, non-hex
     conn = _Connection()
     await _call_ws(
@@ -1047,24 +1301,27 @@ async def test_ws_import_identity_rejects_non_hex(
     )
     assert conn.errors[0][1] == "invalid"
     assert "hex" in conn.errors[0][2].lower()
-    assert len(service_calls) == 0
+    coordinator.api.mesh_core.commands.import_private_key.assert_not_called()
 
 
 async def test_ws_import_identity_strips_whitespace(
-    hass: HomeAssistant, coordinator: MagicMock, monkeypatch
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
 ) -> None:
     """Internal whitespace is stripped before length/hex validation."""
-    service_calls, _ = _identity_change_mocks(hass, monkeypatch)
-    # 128 hex chars with embedded spaces and newlines.
-    valid = "ab" * 64
+    _identity_streaming_mocks(hass, coordinator, monkeypatch)
+    valid = "ab" * 64  # 128 hex chars
     spaced = " ".join(valid[i:i + 8] for i in range(0, len(valid), 8))
     conn = _Connection()
     await _call_ws(
         ws_api.ws_import_identity, hass, conn,
         {"id": 1, "private_key": spaced + "\n"},
     )
-    assert conn.results[0][1]["success"] is True
-    assert service_calls[0].data["command"] == f"import_private_key {valid}"
+    assert conn.results[0][1] == {"success": True}
+    seed_arg = coordinator.api.mesh_core.commands.import_private_key.await_args.args[0]
+    assert seed_arg == bytes.fromhex(valid)
 
 
 async def test_ws_import_identity_error_no_coordinator(
