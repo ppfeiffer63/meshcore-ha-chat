@@ -1074,8 +1074,28 @@ async def ws_set_device_config(hass, connection, msg):
                 # The reload reconstructed the coordinator + entities;
                 # the post-loop self_info refresh below would run
                 # against the soon-to-be-discarded coord. Skip it.
+                #
+                # The `rename` block carries the migration summary back
+                # to the panel so it can render the post-rename
+                # persistent dialog (matches the repair-issue text
+                # minus the bullet list — that's already in
+                # Settings → Repairs and would dwarf the dialog).
+                # Toast alone was too easy to miss for an op that
+                # rewrites 12+ entity_ids and triggers an integration
+                # reload (Phase 2 v4 user-feedback follow-up).
                 connection.send_result(
-                    msg["id"], {"success": True, "changed": changed}
+                    msg["id"],
+                    {
+                        "success": True,
+                        "changed": changed,
+                        "rename": {
+                            "old_name": old_name,
+                            "new_name": new_name,
+                            "old_suffix": old_suffix,
+                            "new_suffix": new_suffix,
+                            "count": len(migrated_pairs),
+                        },
+                    },
                 )
                 return
 

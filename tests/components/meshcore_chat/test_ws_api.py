@@ -826,7 +826,19 @@ async def test_ws_set_device_config_writes_name(
         " `sensor.meshcore_battery_newdev`"
     )
     reload_mock.assert_awaited_once_with("meshcore_entry")
-    assert conn.results[0][1] == {"success": True, "changed": ["name"]}
+    # Phase 2 v4: send_result now carries a `rename` block so the
+    # frontend can render the persistent post-rename dialog (toast was
+    # too easy to miss for an op that rewrites N entity_ids and
+    # triggers an integration reload).
+    result_payload = conn.results[0][1]
+    assert result_payload["success"] is True
+    assert result_payload["changed"] == ["name"]
+    rename = result_payload["rename"]
+    assert rename["old_name"] == "MyDevice"
+    assert rename["new_name"] == "newdev"
+    assert rename["old_suffix"] == "mydevice"
+    assert rename["new_suffix"] == "newdev"
+    assert rename["count"] == 1
 
 
 async def test_ws_set_device_config_no_repair_issue_when_zero_migrated(
@@ -857,7 +869,16 @@ async def test_ws_set_device_config_no_repair_issue_when_zero_migrated(
     update_entry_mock.assert_called_once()
     create_issue_mock.assert_not_called()
     reload_mock.assert_awaited_once_with("meshcore_entry")
-    assert conn.results[0][1] == {"success": True, "changed": ["name"]}
+    # Even when no entities were migrated, the device WAS renamed
+    # (set_name succeeded, entry data updated, reload fired). The
+    # rename block is present with count=0; the frontend can choose
+    # whether to suppress the modal in that case (currently it
+    # renders the modal regardless because the user-facing event
+    # is the rename itself, not the entity migration count).
+    result_payload = conn.results[0][1]
+    assert result_payload["success"] is True
+    assert result_payload["changed"] == ["name"]
+    assert result_payload["rename"]["count"] == 0
 
 
 async def test_ws_set_device_config_skips_migration_on_same_name(
