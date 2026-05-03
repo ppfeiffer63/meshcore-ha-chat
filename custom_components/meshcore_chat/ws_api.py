@@ -873,13 +873,16 @@ def _migrate_entity_ids_name_suffix(
     meshcore_entry_id: str,
     old_suffix: str,
     new_suffix: str,
-) -> int:
+) -> list[tuple[str, str]]:
     """Rewrite entity_ids ending in ``_{old_suffix}`` to end in ``_{new_suffix}``.
 
     Walks the HA entity registry, filters by the meshcore
     ``config_entry_id``, and rewrites ``entity_id`` via
-    ``entity_registry.async_update_entity``. Returns the count of
-    migrated entities.
+    ``entity_registry.async_update_entity``. Returns a list of
+    ``(old_entity_id, new_entity_id)`` pairs for every successful
+    rewrite — caller uses this to populate the ``entity_list``
+    placeholder of the ``name_changed`` repair issue so the user can
+    see exactly which entity_ids changed.
 
     Companion to PR #169's ``_migrate_entity_ids`` in ``meshcore-ha`` —
     same pattern, but operates on the trailing **name suffix** (where
@@ -888,40 +891,41 @@ def _migrate_entity_ids_name_suffix(
     ``import_private_key`` impacts entity_ids). The two migrations are
     independent and never conflict.
 
-    Idempotent on identical or empty suffixes (no mutations, returns 0).
-    Errors on individual entities are logged and swallowed — one bad
-    entity should not abort the whole migration.
+    Idempotent on identical or empty suffixes (no mutations, returns
+    empty list). Errors on individual entities are logged and
+    swallowed — one bad entity should not abort the whole migration.
 
     Forensics: §F06 + §2b.
     """
     if not old_suffix or not new_suffix or old_suffix == new_suffix:
-        return 0
+        return []
     registry = er.async_get(hass)
     old_tail = f"_{old_suffix}"
     new_tail = f"_{new_suffix}"
-    migrated = 0
+    migrated: list[tuple[str, str]] = []
     for entity in list(registry.entities.values()):
         if entity.config_entry_id != meshcore_entry_id:
             continue
         if not entity.entity_id.endswith(old_tail):
             continue
-        new_entity_id = entity.entity_id[: -len(old_tail)] + new_tail
+        old_entity_id = entity.entity_id
+        new_entity_id = old_entity_id[: -len(old_tail)] + new_tail
         try:
             registry.async_update_entity(
-                entity.entity_id, new_entity_id=new_entity_id
+                old_entity_id, new_entity_id=new_entity_id
             )
             _LOGGER.info(
                 "Migrated entity_id: %s -> %s",
-                entity.entity_id, new_entity_id,
+                old_entity_id, new_entity_id,
             )
-            migrated += 1
+            migrated.append((old_entity_id, new_entity_id))
         except Exception as ex:  # pragma: no cover - defensive
             _LOGGER.error(
-                "Failed to migrate entity %s: %s", entity.entity_id, ex
+                "Failed to migrate entity %s: %s", old_entity_id, ex
             )
     _LOGGER.info(
         "Migrated %d entity_id(s): _%s -> _%s",
-        migrated, old_suffix, new_suffix,
+        len(migrated), old_suffix, new_suffix,
     )
     return migrated
 
@@ -994,17 +998,26 @@ async def ws_set_device_config(hass, connection, msg):
                 # re-registration on reload, finds the OLD entity_id in
                 # the registry, and preserves it (proposal §2b "Order
                 # matters").
-                migrated = _migrate_entity_ids_name_suffix(
+                old_suffix = sanitize_name(old_name)
+                new_suffix = sanitize_name(new_name)
+                migrated_pairs = _migrate_entity_ids_name_suffix(
                     hass,
                     meshcore_entry.entry_id,
-                    sanitize_name(old_name),
-                    sanitize_name(new_name),
+                    old_suffix,
+                    new_suffix,
                 )
                 hass.config_entries.async_update_entry(
                     meshcore_entry,
                     data={**meshcore_entry.data, CONF_NAME_UPSTREAM: new_name},
                 )
-                if migrated:
+                if migrated_pairs:
+                    # Markdown bullet list of every (old_id → new_id)
+                    # pair so the repair issue surfaces a complete
+                    # search-replace target list to the user.
+                    entity_list = "\n".join(
+                        f"- `{old_id}` → `{new_id}`"
+                        for old_id, new_id in migrated_pairs
+                    )
                     ir.async_create_issue(
                         hass,
                         DOMAIN,
@@ -1014,9 +1027,19 @@ async def ws_set_device_config(hass, connection, msg):
                         severity=ir.IssueSeverity.WARNING,
                         translation_key="name_changed",
                         translation_placeholders={
+                            # Raw human-readable names for the prose.
                             "old_name": old_name,
                             "new_name": new_name,
-                            "count": str(migrated),
+                            # Sanitized suffixes — what actually
+                            # appears in entity_ids. The earlier bug
+                            # (Phase 2 v1) used `_{old_name}` /
+                            # `_{new_name}` which rendered as
+                            # `_MattDub` / `_Test Rename` instead of
+                            # the real `_mattdub` / `_test_rename`.
+                            "old_suffix": old_suffix,
+                            "new_suffix": new_suffix,
+                            "count": str(len(migrated_pairs)),
+                            "entity_list": entity_list,
                         },
                     )
                 # Reload triggers meshcore's `async_setup_entry` which

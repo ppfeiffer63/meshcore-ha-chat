@@ -631,26 +631,26 @@ def _patch_rename_path(hass, monkeypatch, *, reload_side_effect=None):
 # ─── T2.1 — _migrate_entity_ids_name_suffix helper ──────────────────────
 
 
-def test_migrate_entity_ids_name_suffix_identical_returns_zero(
+def test_migrate_entity_ids_name_suffix_identical_returns_empty(
     hass: HomeAssistant,
 ) -> None:
-    """Identical old/new suffix → no-op, returns 0."""
-    n = ws_api._migrate_entity_ids_name_suffix(
+    """Identical old/new suffix → no-op, returns empty list."""
+    pairs = ws_api._migrate_entity_ids_name_suffix(
         hass, "meshcore_entry", "samename", "samename"
     )
-    assert n == 0
+    assert pairs == []
 
 
-def test_migrate_entity_ids_name_suffix_empty_returns_zero(
+def test_migrate_entity_ids_name_suffix_empty_returns_empty(
     hass: HomeAssistant,
 ) -> None:
-    """Empty old or new → no-op, returns 0 (defensive guard)."""
+    """Empty old or new → no-op, returns empty list (defensive guard)."""
     assert ws_api._migrate_entity_ids_name_suffix(
         hass, "meshcore_entry", "", "newname"
-    ) == 0
+    ) == []
     assert ws_api._migrate_entity_ids_name_suffix(
         hass, "meshcore_entry", "oldname", ""
-    ) == 0
+    ) == []
 
 
 def test_migrate_entity_ids_name_suffix_rewrites_matching(
@@ -695,10 +695,21 @@ def test_migrate_entity_ids_name_suffix_rewrites_matching(
         suggested_object_id="other_mattdub",
     )
 
-    n = ws_api._migrate_entity_ids_name_suffix(
+    pairs = ws_api._migrate_entity_ids_name_suffix(
         hass, "meshcore_entry", "mattdub", "newdub"
     )
-    assert n == 2
+    assert len(pairs) == 2
+    # Each pair is (old_id, new_id) — caller uses these for the
+    # repair-issue entity_list placeholder.
+    pair_dict = dict(pairs)
+    assert (
+        pair_dict["sensor.meshcore_1ed4c1_battery_voltage_mattdub"]
+        == "sensor.meshcore_1ed4c1_battery_voltage_newdub"
+    )
+    assert (
+        pair_dict["sensor.meshcore_1ed4c1_node_count_mattdub"]
+        == "sensor.meshcore_1ed4c1_node_count_newdub"
+    )
 
     # e1 + e2 rewritten; e3 untouched (no _mattdub suffix); e4 untouched
     # (different config entry).
@@ -714,10 +725,10 @@ def test_migrate_entity_ids_name_suffix_rewrites_matching(
     assert registry.async_get(e4.entity_id) is not None
 
 
-def test_migrate_entity_ids_name_suffix_no_matches_returns_zero(
+def test_migrate_entity_ids_name_suffix_no_matches_returns_empty(
     hass: HomeAssistant,
 ) -> None:
-    """No entities ending in `_old` → returns 0, no mutations."""
+    """No entities ending in `_old` → returns empty list, no mutations."""
     from homeassistant.helpers import entity_registry as er
 
     mc_entry = MockConfigEntry(domain="meshcore", entry_id="meshcore_entry")
@@ -728,10 +739,10 @@ def test_migrate_entity_ids_name_suffix_no_matches_returns_zero(
         config_entry=mc_entry,
         suggested_object_id="meshcore_unrelated",
     )
-    n = ws_api._migrate_entity_ids_name_suffix(
+    pairs = ws_api._migrate_entity_ids_name_suffix(
         hass, "meshcore_entry", "nonexistent", "newname"
     )
-    assert n == 0
+    assert pairs == []
     assert registry.async_get(e1.entity_id) is not None
 
 
@@ -782,9 +793,25 @@ async def test_ws_set_device_config_writes_name(
     create_issue_mock.assert_called_once()
     issue_kwargs = create_issue_mock.call_args.kwargs
     assert issue_kwargs["translation_key"] == "name_changed"
-    assert issue_kwargs["translation_placeholders"]["old_name"] == "MyDevice"
-    assert issue_kwargs["translation_placeholders"]["new_name"] == "newdev"
-    assert issue_kwargs["translation_placeholders"]["count"] == "1"
+    placeholders = issue_kwargs["translation_placeholders"]
+    # Raw human-readable names used in the prose part of the description.
+    assert placeholders["old_name"] == "MyDevice"
+    assert placeholders["new_name"] == "newdev"
+    # Sanitized suffixes — what actually appears in entity_ids. The
+    # earlier (Phase 2 v1) `_{old_name}` / `_{new_name}` literal
+    # substitutions rendered as `_MyDevice` / `_newdev` instead of the
+    # actual `_mydevice` / `_newdev`. Now we pass the canonical
+    # sanitized form explicitly.
+    assert placeholders["old_suffix"] == "mydevice"
+    assert placeholders["new_suffix"] == "newdev"
+    assert placeholders["count"] == "1"
+    # Markdown bullet list of every (old_id → new_id) pair so the user
+    # gets a complete search-replace target list in the repair issue.
+    assert (
+        placeholders["entity_list"]
+        == "- `sensor.meshcore_battery_mydevice` →"
+        " `sensor.meshcore_battery_newdev`"
+    )
     reload_mock.assert_awaited_once_with("meshcore_entry")
     assert conn.results[0][1] == {"success": True, "changed": ["name"]}
 
