@@ -570,31 +570,374 @@ async def test_ws_get_device_config_error_no_coordinator(
 
 
 # ─── ws_set_device_config (DESTRUCTIVE) ─────────────────────────────────
+#
+# Phase 2 (post-deploy 2026-05-03 forensics §F06 + §2b) extended the
+# `name` branch with an entity_id migration: on rename, rewrite all
+# entity_ids ending in `_<sanitized-old-name>` to end in
+# `_<sanitized-new-name>`, write the new name back to the upstream
+# meshcore config-entry data, create a `name_changed` repair issue,
+# and reload the entry. Tests below cover:
+#
+#  - rename happy path drives the full migration → entry-update → repair
+#    issue → reload sequence, then early-returns (T2.2);
+#  - rename to the same name skips the migration but still calls
+#    `set_name` and falls through to the post-loop self_info refresh;
+#  - firmware `EventType.ERROR` on `set_name` raises `RenameError` and
+#    surfaces as `send_error("rename_rejected", ...)` (alignment with
+#    Phase 1.1);
+#  - the migration helper `_migrate_entity_ids_name_suffix` itself is
+#    tested directly (T2.1).
+
+
+def _make_meshcore_entry(hass: HomeAssistant) -> MockConfigEntry:
+    """Companion helper: a meshcore-domain config entry with id matching
+    the coordinator fixture's `config_entry.entry_id`. Lives in
+    `hass.config_entries` so `async_get_entry` resolves it.
+    """
+    entry = MockConfigEntry(
+        domain=MESHCORE_DOMAIN,
+        title="MeshCore",
+        entry_id="meshcore_entry",
+        data={"name": "MyDevice"},
+        options={},
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _patch_rename_path(hass, monkeypatch, *, reload_side_effect=None):
+    """Mock the read-only ConfigEntries write/reload surfaces and
+    `ir.async_create_issue` so the rename branch of
+    `ws_set_device_config` can run end-to-end against a registry mock.
+
+    Returns ``(reload_mock, update_entry_mock, create_issue_mock)`` for
+    introspection.
+    """
+    reload_mock = AsyncMock(side_effect=reload_side_effect)
+    update_entry_mock = MagicMock(return_value=True)
+    create_issue_mock = MagicMock()
+    monkeypatch.setattr(
+        type(hass.config_entries), "async_reload", reload_mock
+    )
+    monkeypatch.setattr(
+        type(hass.config_entries), "async_update_entry", update_entry_mock
+    )
+    monkeypatch.setattr(
+        ws_api.ir, "async_create_issue", create_issue_mock
+    )
+    return reload_mock, update_entry_mock, create_issue_mock
+
+
+# ─── T2.1 — _migrate_entity_ids_name_suffix helper ──────────────────────
+
+
+def test_migrate_entity_ids_name_suffix_identical_returns_zero(
+    hass: HomeAssistant,
+) -> None:
+    """Identical old/new suffix → no-op, returns 0."""
+    n = ws_api._migrate_entity_ids_name_suffix(
+        hass, "meshcore_entry", "samename", "samename"
+    )
+    assert n == 0
+
+
+def test_migrate_entity_ids_name_suffix_empty_returns_zero(
+    hass: HomeAssistant,
+) -> None:
+    """Empty old or new → no-op, returns 0 (defensive guard)."""
+    assert ws_api._migrate_entity_ids_name_suffix(
+        hass, "meshcore_entry", "", "newname"
+    ) == 0
+    assert ws_api._migrate_entity_ids_name_suffix(
+        hass, "meshcore_entry", "oldname", ""
+    ) == 0
+
+
+def test_migrate_entity_ids_name_suffix_rewrites_matching(
+    hass: HomeAssistant,
+) -> None:
+    """Multi-entity rename: every meshcore-owned entity with `_old`
+    suffix becomes `_new`; entities owned by other entries are left
+    alone; entities not ending in `_old` are left alone.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    # Both config entries must be live in `hass.config_entries` for the
+    # entity registry's foreign-key validation to accept them.
+    mc_entry = MockConfigEntry(domain="meshcore", entry_id="meshcore_entry")
+    mc_entry.add_to_hass(hass)
+    other_entry = MockConfigEntry(
+        domain="other_integration", entry_id="other_entry"
+    )
+    other_entry.add_to_hass(hass)
+
+    registry = er.async_get(hass)
+    # Three meshcore-owned entities, two ending in _mattdub:
+    e1 = registry.async_get_or_create(
+        "sensor", "meshcore", "uid_battery_voltage_1ed4c1",
+        config_entry=mc_entry,
+        suggested_object_id="meshcore_1ed4c1_battery_voltage_mattdub",
+    )
+    e2 = registry.async_get_or_create(
+        "sensor", "meshcore", "uid_node_count_1ed4c1",
+        config_entry=mc_entry,
+        suggested_object_id="meshcore_1ed4c1_node_count_mattdub",
+    )
+    e3 = registry.async_get_or_create(
+        "sensor", "meshcore", "uid_unrelated_no_suffix",
+        config_entry=mc_entry,
+        suggested_object_id="meshcore_unrelated_no_suffix",
+    )
+    # One entity owned by a different config entry — must NOT be migrated.
+    e4 = registry.async_get_or_create(
+        "sensor", "other_integration", "uid_other_mattdub",
+        config_entry=other_entry,
+        suggested_object_id="other_mattdub",
+    )
+
+    n = ws_api._migrate_entity_ids_name_suffix(
+        hass, "meshcore_entry", "mattdub", "newdub"
+    )
+    assert n == 2
+
+    # e1 + e2 rewritten; e3 untouched (no _mattdub suffix); e4 untouched
+    # (different config entry).
+    assert registry.async_get(e1.entity_id) is None
+    assert registry.async_get(
+        "sensor.meshcore_1ed4c1_battery_voltage_newdub"
+    ) is not None
+    assert registry.async_get(e2.entity_id) is None
+    assert registry.async_get(
+        "sensor.meshcore_1ed4c1_node_count_newdub"
+    ) is not None
+    assert registry.async_get(e3.entity_id) is not None
+    assert registry.async_get(e4.entity_id) is not None
+
+
+def test_migrate_entity_ids_name_suffix_no_matches_returns_zero(
+    hass: HomeAssistant,
+) -> None:
+    """No entities ending in `_old` → returns 0, no mutations."""
+    from homeassistant.helpers import entity_registry as er
+
+    mc_entry = MockConfigEntry(domain="meshcore", entry_id="meshcore_entry")
+    mc_entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    e1 = registry.async_get_or_create(
+        "sensor", "meshcore", "uid_no_suffix_match",
+        config_entry=mc_entry,
+        suggested_object_id="meshcore_unrelated",
+    )
+    n = ws_api._migrate_entity_ids_name_suffix(
+        hass, "meshcore_entry", "nonexistent", "newname"
+    )
+    assert n == 0
+    assert registry.async_get(e1.entity_id) is not None
+
+
+# ─── T2.2 — ws_set_device_config name branch (Phase 2 happy path) ────────
 
 
 async def test_ws_set_device_config_writes_name(
-    hass: HomeAssistant, coordinator: MagicMock
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
 ) -> None:
-    coordinator.api.mesh_core.commands.set_name = AsyncMock()
-    coordinator.api.mesh_core.commands.send_appstart = AsyncMock(
-        return_value=MagicMock()
+    """Rename happy path: set_name → migration → entry update → repair
+    issue (because count > 0) → reload → early-return success.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    # Seed one meshcore-owned entity that should migrate.
+    mc_entry = _make_meshcore_entry(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "sensor", "meshcore", "uid_battery_mydevice",
+        config_entry=mc_entry,
+        suggested_object_id="meshcore_battery_mydevice",
     )
-    coordinator.api._cache_self_info_event = MagicMock()
+
+    # set_name returns OK Event (Phase 2 inspects .type).
+    coordinator.api.mesh_core.commands.set_name = AsyncMock(
+        return_value=_FakeEvent(_FakeEventType.OK, {})
+    )
+    reload_mock, update_entry_mock, create_issue_mock = _patch_rename_path(
+        hass, monkeypatch
+    )
+
     conn = _Connection()
     await _call_ws(
         ws_api.ws_set_device_config,
         hass,
         conn,
-        {"id": 1, "settings": {"name": "newname"}},
+        {"id": 1, "settings": {"name": "newdev"}},
     )
-    coordinator.api.mesh_core.commands.set_name.assert_awaited_once_with("newname")
+
+    coordinator.api.mesh_core.commands.set_name.assert_awaited_once_with("newdev")
+    update_entry_mock.assert_called_once()
+    # Inspect the data= kwarg: must include the new CONF_NAME_UPSTREAM.
+    update_kwargs = update_entry_mock.call_args.kwargs
+    assert update_kwargs["data"]["name"] == "newdev"
+    create_issue_mock.assert_called_once()
+    issue_kwargs = create_issue_mock.call_args.kwargs
+    assert issue_kwargs["translation_key"] == "name_changed"
+    assert issue_kwargs["translation_placeholders"]["old_name"] == "MyDevice"
+    assert issue_kwargs["translation_placeholders"]["new_name"] == "newdev"
+    assert issue_kwargs["translation_placeholders"]["count"] == "1"
+    reload_mock.assert_awaited_once_with("meshcore_entry")
     assert conn.results[0][1] == {"success": True, "changed": ["name"]}
+
+
+async def test_ws_set_device_config_no_repair_issue_when_zero_migrated(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
+) -> None:
+    """Rename when no entity_ids end in the old suffix → no repair issue
+    (the issue is informational about migrated entities; zero migrated
+    → no signal worth surfacing).
+    """
+    _make_meshcore_entry(hass)
+    coordinator.api.mesh_core.commands.set_name = AsyncMock(
+        return_value=_FakeEvent(_FakeEventType.OK, {})
+    )
+    reload_mock, update_entry_mock, create_issue_mock = _patch_rename_path(
+        hass, monkeypatch
+    )
+
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_set_device_config,
+        hass,
+        conn,
+        {"id": 1, "settings": {"name": "newdev"}},
+    )
+    update_entry_mock.assert_called_once()
+    create_issue_mock.assert_not_called()
+    reload_mock.assert_awaited_once_with("meshcore_entry")
+    assert conn.results[0][1] == {"success": True, "changed": ["name"]}
+
+
+async def test_ws_set_device_config_skips_migration_on_same_name(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
+) -> None:
+    """Rename to identical existing name: set_name still called (idempotent
+    device-side op), but no migration / no entry update / no reload."""
+    _make_meshcore_entry(hass)
+    coordinator.name = "samename"
+    coordinator.api.mesh_core.commands.set_name = AsyncMock(
+        return_value=_FakeEvent(_FakeEventType.OK, {})
+    )
+    coordinator.api.mesh_core.commands.send_appstart = AsyncMock(
+        return_value=_FakeEvent(_FakeEventType.OK, {})
+    )
+    coordinator.api._cache_self_info_event = MagicMock()
+    reload_mock, update_entry_mock, create_issue_mock = _patch_rename_path(
+        hass, monkeypatch
+    )
+
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_set_device_config,
+        hass,
+        conn,
+        {"id": 1, "settings": {"name": "samename"}},
+    )
+    coordinator.api.mesh_core.commands.set_name.assert_awaited_once_with("samename")
+    update_entry_mock.assert_not_called()
+    create_issue_mock.assert_not_called()
+    reload_mock.assert_not_awaited()
+    # Falls through to post-loop self_info refresh on the same coord.
+    assert conn.results[0][1] == {"success": True, "changed": ["name"]}
+
+
+async def test_ws_set_device_config_rename_firmware_error_surfaces_rejection(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+    patched_event_type,
+) -> None:
+    """`set_name` returns ERROR Event → RenameError → `rename_rejected`.
+
+    Mirrors Phase 1.1's `import_rejected` surface for `set_name` so the
+    F10 silent-success-on-firmware-error class cannot recur on the
+    rename path.
+    """
+    _make_meshcore_entry(hass)
+    coordinator.api.mesh_core.commands.set_name = AsyncMock(
+        return_value=_FakeEvent(
+            _FakeEventType.ERROR,
+            {"code_string": "ERR_CODE_ILLEGAL_ARG", "error_code": 6},
+        )
+    )
+    reload_mock, update_entry_mock, create_issue_mock = _patch_rename_path(
+        hass, monkeypatch
+    )
+
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_set_device_config,
+        hass,
+        conn,
+        {"id": 1, "settings": {"name": "badname"}},
+    )
+
+    # No migration / entry update / reload — short-circuited at set_name.
+    update_entry_mock.assert_not_called()
+    create_issue_mock.assert_not_called()
+    reload_mock.assert_not_awaited()
+    assert len(conn.errors) == 1
+    msg_id, code, message = conn.errors[0]
+    assert code == "rename_rejected"
+    assert "ERR_CODE_ILLEGAL_ARG" in message
+
+
+async def test_ws_set_device_config_rename_none_response_surfaces_rejection(
+    hass: HomeAssistant,
+    coordinator: MagicMock,
+    monkeypatch,
+) -> None:
+    """`set_name` returns None → RenameError → `rename_rejected`.
+
+    Defensive: even if the SDK ever returned None instead of an Event,
+    we treat it as a rejection rather than a silent success. The
+    `EventType` import is lazy so this test does not need the
+    `patched_event_type` fixture.
+    """
+    _make_meshcore_entry(hass)
+    coordinator.api.mesh_core.commands.set_name = AsyncMock(return_value=None)
+    reload_mock, update_entry_mock, create_issue_mock = _patch_rename_path(
+        hass, monkeypatch
+    )
+
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_set_device_config,
+        hass,
+        conn,
+        {"id": 1, "settings": {"name": "badname"}},
+    )
+    assert len(conn.errors) == 1
+    assert conn.errors[0][1] == "rename_rejected"
+    assert "unknown" in conn.errors[0][2]
+    update_entry_mock.assert_not_called()
+    reload_mock.assert_not_awaited()
 
 
 async def test_ws_set_device_config_handles_command_failure(
     hass: HomeAssistant, coordinator: MagicMock
 ) -> None:
-    """SDK raises ConnectionError → mapped to not_connected via _WS_ERROR_MAP."""
+    """SDK raises ConnectionError → mapped to not_connected via _WS_ERROR_MAP.
+
+    The lazy `EventType` import means SDK-level exceptions propagate
+    through the outer except without first tripping a missing-meshcore
+    import in the test env — no `patched_event_type` fixture needed.
+    """
     coordinator.api.mesh_core.commands.set_name = AsyncMock(
         side_effect=ConnectionError("device offline")
     )
