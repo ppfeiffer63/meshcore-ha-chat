@@ -6554,43 +6554,39 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
         </div>
       </div>
     `}_closeRenameSuccessModal(){this._renameSuccess=null,this._loadDeviceConfig(),this.dispatchEvent(new CustomEvent("device-renamed",{bubbles:!0,composed:!0}))}_renderRenameSuccessModal(){const e=this._renameSuccess;return e?j`
-      <div class="modal-overlay">
-        <div class="modal-card" data-a11y="rename-success"
+      <div class="dialog-overlay">
+        <div class="dialog"
              role="dialog" aria-modal="true" aria-label="Device renamed"
-             style="max-width: 480px;"
+             data-a11y="rename-success"
              @click=${e=>e.stopPropagation()}>
-          <div class="modal-header">
-            <span class="modal-title">Device renamed</span>
-            <button class="modal-close" aria-label="Close"
-                    @click=${this._closeRenameSuccessModal}>&times;</button>
+          <div class="dialog-header">
+            <div class="dialog-header-title">Device renamed</div>
           </div>
-          <div class="modal-body" style="padding: 20px;">
-            <div style="font-size: 14px; line-height: 1.5;">
-              <p style="margin: 0 0 12px 0;">
-                The MeshCore device was renamed from
-                <code>${e.old_name}</code> to <code>${e.new_name}</code>.
-              </p>
-              <p style="margin: 0 0 12px 0;">
-                ${e.count}
-                ${1===e.count?"entity ID was":"entity IDs were"}
-                automatically migrated from the
-                <code>_${e.old_suffix}</code> suffix to
-                <code>_${e.new_suffix}</code>.
-              </p>
-              <p style="margin: 0 0 12px 0;">
-                If you have automations, scripts, or dashboards
-                referencing the old entity IDs, you will need to
-                update them manually to use the new suffix.
-              </p>
-              <p style="margin: 0; color: var(--secondary-text-color); font-size: 13px;">
-                The full list of renamed entity IDs is available
-                in Settings → Repairs.
-              </p>
-            </div>
-            <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
-              <button class="modal-action"
-                      @click=${this._closeRenameSuccessModal}>Close</button>
-            </div>
+          <div class="dialog-body">
+            <p style="margin: 0 0 12px 0;">
+              The MeshCore device was renamed from
+              <code>${e.old_name}</code> to <code>${e.new_name}</code>.
+            </p>
+            <p style="margin: 0 0 12px 0;">
+              ${e.count}
+              ${1===e.count?"entity ID was":"entity IDs were"}
+              automatically migrated from the
+              <code>_${e.old_suffix}</code> suffix to
+              <code>_${e.new_suffix}</code>.
+            </p>
+            <p style="margin: 0 0 12px 0;">
+              If you have automations, scripts, or dashboards
+              referencing the old entity IDs, you will need to
+              update them manually to use the new suffix.
+            </p>
+            <p style="margin: 0; color: var(--secondary-text-color); font-size: 13px;">
+              The full list of renamed entity IDs is available in
+              Settings → Repairs.
+            </p>
+          </div>
+          <div class="dialog-footer">
+            <button class="dialog-button primary"
+                    @click=${this._closeRenameSuccessModal}>Close</button>
           </div>
         </div>
       </div>

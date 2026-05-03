@@ -1775,49 +1775,50 @@ export class SettingsPage extends LitElement {
     const r = this._renameSuccess;
     if (!r) return nothing;
 
-    // Body matches the `name_changed` repair issue text minus the
+    // Uses the canonical `.dialog-*` pattern (same as
+    // `meshcore-confirm-dialog`) rather than the `.modal-*` pattern
+    // (which is for full-width left-aligned menu-list items, e.g.
+    // the Companion Settings overflow menu). Visual consistency
+    // with the rename CONFIRM dialog the user just clicked through.
+    //
+    // Body matches the `name_changed` repair-issue text minus the
     // bullet list of (old_id → new_id) pairs — that list lives in
     // Settings → Repairs (one issue per rename, timestamped) and
-    // would dwarf the dialog. Direct user to the Repairs surface
-    // for the search-replace target list.
+    // would dwarf the dialog.
     return html`
-      <div class="modal-overlay">
-        <div class="modal-card" data-a11y="rename-success"
+      <div class="dialog-overlay">
+        <div class="dialog"
              role="dialog" aria-modal="true" aria-label="Device renamed"
-             style="max-width: 480px;"
+             data-a11y="rename-success"
              @click=${(e: Event) => e.stopPropagation()}>
-          <div class="modal-header">
-            <span class="modal-title">Device renamed</span>
-            <button class="modal-close" aria-label="Close"
-                    @click=${this._closeRenameSuccessModal}>&times;</button>
+          <div class="dialog-header">
+            <div class="dialog-header-title">Device renamed</div>
           </div>
-          <div class="modal-body" style="padding: 20px;">
-            <div style="font-size: 14px; line-height: 1.5;">
-              <p style="margin: 0 0 12px 0;">
-                The MeshCore device was renamed from
-                <code>${r.old_name}</code> to <code>${r.new_name}</code>.
-              </p>
-              <p style="margin: 0 0 12px 0;">
-                ${r.count}
-                ${r.count === 1 ? 'entity ID was' : 'entity IDs were'}
-                automatically migrated from the
-                <code>_${r.old_suffix}</code> suffix to
-                <code>_${r.new_suffix}</code>.
-              </p>
-              <p style="margin: 0 0 12px 0;">
-                If you have automations, scripts, or dashboards
-                referencing the old entity IDs, you will need to
-                update them manually to use the new suffix.
-              </p>
-              <p style="margin: 0; color: var(--secondary-text-color); font-size: 13px;">
-                The full list of renamed entity IDs is available
-                in Settings → Repairs.
-              </p>
-            </div>
-            <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
-              <button class="modal-action"
-                      @click=${this._closeRenameSuccessModal}>Close</button>
-            </div>
+          <div class="dialog-body">
+            <p style="margin: 0 0 12px 0;">
+              The MeshCore device was renamed from
+              <code>${r.old_name}</code> to <code>${r.new_name}</code>.
+            </p>
+            <p style="margin: 0 0 12px 0;">
+              ${r.count}
+              ${r.count === 1 ? 'entity ID was' : 'entity IDs were'}
+              automatically migrated from the
+              <code>_${r.old_suffix}</code> suffix to
+              <code>_${r.new_suffix}</code>.
+            </p>
+            <p style="margin: 0 0 12px 0;">
+              If you have automations, scripts, or dashboards
+              referencing the old entity IDs, you will need to
+              update them manually to use the new suffix.
+            </p>
+            <p style="margin: 0; color: var(--secondary-text-color); font-size: 13px;">
+              The full list of renamed entity IDs is available in
+              Settings → Repairs.
+            </p>
+          </div>
+          <div class="dialog-footer">
+            <button class="dialog-button primary"
+                    @click=${this._closeRenameSuccessModal}>Close</button>
           </div>
         </div>
       </div>
