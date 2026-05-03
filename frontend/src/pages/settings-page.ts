@@ -1402,13 +1402,13 @@ export class SettingsPage extends LitElement {
   private _showRegenIdentityConfirm() {
     this._confirmAction = {
       title: 'Regenerate Identity',
-      message: 'This will create a new cryptographic identity. All existing contacts will need to re-add your device. All entity IDs will change — automations, scripts, and dashboards using current entity IDs will need to be updated. This cannot be undone.',
+      message: 'This will create a new cryptographic identity, reboot the device, and migrate all entity IDs to the new key prefix. Existing automations referencing entity IDs by the old prefix will need updating. All contacts must re-add this device. This cannot be undone.',
       requireTyped: 'REGENERATE',
       onConfirm: async () => {
         if (!this.hass) return;
         const result = await regenerateIdentity(this.hass, this.config?.node_prefix);
         if (result.success) {
-          this._showStatusMessage(`New identity created: ${result.new_pubkey?.slice(0, 8)}...`, 'success');
+          this._showStatusMessage(result.warning || 'Identity regenerated', 'success');
           await this._loadDeviceConfig();
         } else {
           this._showStatusMessage('Identity regeneration failed', 'error');
@@ -1419,10 +1419,20 @@ export class SettingsPage extends LitElement {
   }
 
   private _handleImportKeyConfirm() {
-    if (!this._importKeyValue.trim()) return;
+    const raw = this._importKeyValue.trim().replace(/\s+/g, '');
+    if (!raw) return;
+    if (raw.length !== 64 && raw.length !== 128) {
+      this._showStatusMessage('Private key must be 64 or 128 hex characters', 'error');
+      return;
+    }
+    if (!/^[0-9a-fA-F]+$/.test(raw)) {
+      this._showStatusMessage('Private key must be hex (0-9, a-f)', 'error');
+      return;
+    }
     this._confirmAction = {
       title: 'Import Private Key',
-      message: 'Importing a private key changes the device identity. All entity IDs will change — automations, scripts, and dashboards using current entity IDs will need to be updated. A reboot is required after import.',
+      message: 'Importing a private key will replace the device identity, reboot the device, and migrate all entity IDs to the new key prefix. Existing automations referencing entity IDs by the old prefix will need updating. All contacts must re-add this device.',
+      requireTyped: 'IMPORT',
       onConfirm: () => this._importIdentityKey(),
     };
     this._confirmDialogOpen = true;
@@ -1431,10 +1441,11 @@ export class SettingsPage extends LitElement {
   private async _importIdentityKey() {
     if (!this.hass || !this._importKeyValue.trim()) return;
     try {
-      const result = await importIdentity(this.hass, this._importKeyValue.trim(), this.config?.node_prefix);
+      const sanitized = this._importKeyValue.trim().replace(/\s+/g, '');
+      const result = await importIdentity(this.hass, sanitized, this.config?.node_prefix);
       if (result.success) {
         this._importKeyValue = '';
-        this._showStatusMessage(`Identity imported: ${result.pubkey?.slice(0, 8)}...`, 'success');
+        this._showStatusMessage(result.warning || 'Identity imported', 'success');
         await this._loadDeviceConfig();
       } else {
         this._showStatusMessage('Identity import failed', 'error');
