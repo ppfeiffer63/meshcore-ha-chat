@@ -55,6 +55,12 @@
     },
     "no_meshcore_coordinator": {
       "message": "No active MeshCore coordinator"
+    },
+    "invalid_key_length": {
+      "message": "Private key must be 64 or 128 hex characters"
+    },
+    "invalid_key_hex": {
+      "message": "Private key must contain only hex characters (0-9, a-f)"
     }
   }
 }
