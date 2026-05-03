@@ -1018,10 +1018,27 @@ async def ws_set_device_config(hass, connection, msg):
                         f"- `{old_id}` → `{new_id}`"
                         for old_id, new_id in migrated_pairs
                     )
+                    # Unique issue_id per rename event so each rename
+                    # becomes its own audit-trail entry. The earlier
+                    # design (Phase 2 v1/v2: issue_id keyed only on
+                    # entry_id) was idempotent on
+                    # ``(domain, issue_id)`` — but HA's
+                    # ``async_create_issue`` preserves the
+                    # ``dismissed_version`` flag across overwrites,
+                    # so once the user dismissed any rename's issue
+                    # all subsequent renames silently wrote into a
+                    # dismissed shell. With a timestamped
+                    # issue_id, every rename surfaces a fresh,
+                    # un-dismissed event the user can act on or
+                    # dismiss individually.
+                    rename_ts = int(time.time())
+                    issue_id = (
+                        f"name_changed_{meshcore_entry.entry_id}_{rename_ts}"
+                    )
                     ir.async_create_issue(
                         hass,
                         DOMAIN,
-                        f"name_changed_{meshcore_entry.entry_id}",
+                        issue_id,
                         is_fixable=False,
                         is_persistent=True,
                         severity=ir.IssueSeverity.WARNING,

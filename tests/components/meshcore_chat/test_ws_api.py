@@ -791,6 +791,19 @@ async def test_ws_set_device_config_writes_name(
     update_kwargs = update_entry_mock.call_args.kwargs
     assert update_kwargs["data"]["name"] == "newdev"
     create_issue_mock.assert_called_once()
+    # Issue ID is the third positional arg
+    # (hass, DOMAIN, issue_id, **kwargs). Phase 2 v3 made the ID
+    # unique-per-rename via a unix timestamp suffix so each rename
+    # surfaces a fresh, un-dismissed issue. Earlier designs (Phase 2
+    # v1/v2) used `name_changed_{entry_id}` and were idempotent on
+    # overwrites — but HA preserves the dismissed_version flag, which
+    # silently hid every post-dismissal rename's signal.
+    issue_args = create_issue_mock.call_args.args
+    issue_id = issue_args[2]
+    assert issue_id.startswith("name_changed_meshcore_entry_")
+    # Trailing component is a Unix-epoch integer (seconds resolution).
+    ts_part = issue_id.rsplit("_", 1)[-1]
+    assert ts_part.isdigit() and len(ts_part) >= 10  # >= 10 digits = post-2001
     issue_kwargs = create_issue_mock.call_args.kwargs
     assert issue_kwargs["translation_key"] == "name_changed"
     placeholders = issue_kwargs["translation_placeholders"]
