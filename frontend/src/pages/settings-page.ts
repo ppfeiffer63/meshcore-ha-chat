@@ -1757,12 +1757,18 @@ export class SettingsPage extends LitElement {
 
   private _closeRenameSuccessModal() {
     // Clear the modal state and refresh the device config so the
-    // settings page reflects the new name immediately. The
-    // server-side reload already updated CONF_NAME and reconstructed
-    // the coordinator; _loadDeviceConfig pulls the fresh state into
-    // our local _deviceConfig.
+    // settings page's "Device Name" input reflects the new value.
     this._renameSuccess = null;
     void this._loadDeviceConfig();
+    // The companion-card title elsewhere on this page (and the
+    // panel's header) reads from `selectedDevice.name`, which is
+    // owned by the parent panel's `_devices` array — NOT from
+    // `_deviceConfig`. Notify the parent so it can re-fetch
+    // `getDevices(...)` and refresh `_devices` (which makes the
+    // computed `_selectedDevice` reflect the new name).
+    this.dispatchEvent(
+      new CustomEvent('device-renamed', { bubbles: true, composed: true }),
+    );
   }
 
   private _renderRenameSuccessModal() {
