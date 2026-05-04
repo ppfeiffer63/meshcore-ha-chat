@@ -923,7 +923,7 @@ export class SettingsPage extends LitElement {
         <div class="companion-header">
           <div class="section-title">
             <div class="section-icon companion">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6.05 4.14l-.39-.39c-.39-.39-1.02-.39-1.41 0l-.01.01c-.39.39-.39 1.02 0 1.41l.39.39c.39.39 1.03.39 1.42 0 .39-.39.39-1.03 0-1.42zm12.3-.01c-.39-.39-1.02-.39-1.41 0l-.38.38c-.39.39-.39 1.03 0 1.42.39.39 1.02.39 1.41 0l.38-.38c.4-.4.4-1.03.01-1.42zM12 4c.55 0 1-.45 1-1V1c0-.55-.45-1-1-1s-1 .45-1 1v2c0 .55.45 1 1 1zm-1 11h2v2h-2v-2zm7-5c0 3.87-3.13 7-7 7s-7-3.13-7-7 3.13-7 7-7 7 3.13 7 7z"/></svg>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M9,2A1,1 0 0,0 8,3C8,8.67 8,14.33 8,20C8,21.11 8.89,22 10,22H15C16.11,22 17,21.11 17,20V9C17,7.89 16.11,7 15,7H10V3A1,1 0 0,0 9,2M10,9H15V13H10V9Z"/></svg>
             </div>
             <div>
               <div class="device-name">${d.name}</div>
