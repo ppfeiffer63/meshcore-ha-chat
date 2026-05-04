@@ -68,6 +68,20 @@ export class ChatPage extends LitElement {
    * `MARK_READ_GRACE_PERIOD_MS` in constants.ts.
    */
   private _markReadGraceUntil = 0;
+  /**
+   * Phase 4 fix (Bug #1 — low-unread auto-mark-read): one-shot timer
+   * scheduled at conversation-switch time to re-check at-bottom +
+   * !hasNewerMessages after the R1 grace period elapses. Required
+   * because the divider's scroll-into-view fires its scroll event
+   * INSIDE the grace window — the synchronous mark-read attempt is
+   * suppressed, and no further scroll events fire on their own. This
+   * deferred re-check is what makes the proposal's 8g item ("auto-
+   * mark-read after initial open settles") actually work.
+   *
+   * Cleared on every switchEntity (so a quick conversation flip
+   * cancels the in-flight check) and on disconnectedCallback.
+   */
+  private _postSwitchMarkReadTimer: ReturnType<typeof setTimeout> | null = null;
 
   static styles = css`
     :host {
@@ -443,6 +457,10 @@ export class ChatPage extends LitElement {
       this._mediaQuery.removeEventListener('change', this._mediaHandler);
       this._mediaQuery = null;
       this._mediaHandler = null;
+    }
+    if (this._postSwitchMarkReadTimer) {
+      clearTimeout(this._postSwitchMarkReadTimer);
+      this._postSwitchMarkReadTimer = null;
     }
   }
 
@@ -880,6 +898,30 @@ export class ChatPage extends LitElement {
       // conversation fire without delay.
       this._markReadGraceUntil = Date.now() + MARK_READ_GRACE_PERIOD_MS;
 
+      // Phase 4 fix (Bug #1): the divider's scroll-into-view fires its
+      // scroll event INSIDE the grace window — the synchronous
+      // mark-read attempt from `_checkAndMarkReadIfAtBottom` gets
+      // suppressed, and no further scroll events fire on their own
+      // until the user scrolls. Without this deferred re-check, a
+      // low-unread open would never advance the cursor, leaving the
+      // sidebar badge and the in-chat indicator stuck visible until
+      // the user manually scrolls.
+      //
+      // Cancel any in-flight timer first so a quick
+      // conversation-flip doesn't double-fire on the wrong entity.
+      if (this._postSwitchMarkReadTimer) {
+        clearTimeout(this._postSwitchMarkReadTimer);
+      }
+      const switchedToEntityId = entityId;
+      this._postSwitchMarkReadTimer = setTimeout(() => {
+        this._postSwitchMarkReadTimer = null;
+        // Skip if the user has switched away to a different
+        // conversation in the meantime — `_currentEntityId` is
+        // updated synchronously inside `_onConversationSelected`.
+        if (this._currentEntityId !== switchedToEntityId) return;
+        this._checkAndMarkReadIfAtBottom();
+      }, MARK_READ_GRACE_PERIOD_MS);
+
       // Phase 4 (Change 8a): NO eager mark-read here. Mark-read fires
       // only from `_checkAndMarkReadIfAtBottom`, driven by viewport
       // scroll position (Change 8d) or the "↓ N new" indicator
@@ -1153,6 +1195,40 @@ export class ChatPage extends LitElement {
   }
 
   /**
+   * Phase 4 fix (Bug #2): geometric "last message visible" check.
+   *
+   * Replaces the pre-fix pixel-distance check
+   * (`distFromBottom < AT_BOTTOM_THRESHOLD_PX = 150`) inside the
+   * mark-read trigger. 150 px is roughly 1-2 message-bubble heights,
+   * so the user could be that far above the actual newest message
+   * and still trigger mark-read prematurely (visible in 2026-05-04
+   * Phase 4 manual test, video 2 — 15-unread case marked read with
+   * the latest message still off-screen).
+   *
+   * The intent of the proposal's §"Mark-read semantics" was "user has
+   * the chronologically newest message visible." This helper checks
+   * exactly that by comparing the last `meshcore-message-bubble`'s
+   * bottom edge against the chat container's bottom edge. 5 px slack
+   * absorbs sub-pixel rounding from getBoundingClientRect.
+   *
+   * `AT_BOTTOM_THRESHOLD_PX = 150` is unchanged for `setUserAtBottom`
+   * and lazy-load-newer triggering — those are coarser concerns where
+   * pixel-perfect bottom detection isn't required (and is in fact
+   * unhelpful for the lazy-load-newer case, where you want to start
+   * fetching before the user hits the literal bottom).
+   */
+  private _isLastMessageVisible(): boolean {
+    const container = this._getChatContainer();
+    if (!container) return false;
+    const bubbles = container.querySelectorAll('meshcore-message-bubble');
+    const last = bubbles[bubbles.length - 1] as HTMLElement | undefined;
+    if (!last) return false;
+    const containerBottom = container.getBoundingClientRect().bottom;
+    const lastBottom = last.getBoundingClientRect().bottom;
+    return lastBottom <= containerBottom + 5;
+  }
+
+  /**
    * Phase 4 (Change 8d): viewport-based mark-read trigger.
    *
    * Idempotent — the backend's `mark_read` is cheap and
@@ -1166,12 +1242,24 @@ export class ChatPage extends LitElement {
    * without delay (the timestamp is in the past from the second call
    * onward).
    *
+   * Bug #2 fix (post-Phase-4): also gates on `_isLastMessageVisible()`
+   * so mark-read only fires when the chronologically newest bubble is
+   * actually within the viewport, not just when the scroll is within
+   * 150 px of the buffer bottom.
+   *
    * Resets the "↓ N new" indicator counter after firing — the user is
    * caught up, so the badge should clear.
    */
   private _checkAndMarkReadIfAtBottom(): void {
     if (!this._currentEntityId) return;
     if (Date.now() < this._markReadGraceUntil) return;
+    // Defensive: also gate on `!hasNewerMessages` here so any caller
+    // (the deferred-re-check timer, _jumpToBottom, _onChatScroll) is
+    // safe. _onChatScroll already checks this externally; the timer
+    // path didn't, which is what made this gate worth duplicating
+    // inside the helper.
+    if (this._messageStore?.hasNewerMessages) return;
+    if (!this._isLastMessageVisible()) return;
     this._markActiveRead(this._currentEntityId);
     this._messageStore?.resetNewMessagesCounter();
   }
