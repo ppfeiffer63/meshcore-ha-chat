@@ -24,6 +24,7 @@ Standalone HACS Integration.md, Change 5):
 from __future__ import annotations
 
 import asyncio
+import bisect
 import logging
 import time
 from datetime import datetime, timedelta
@@ -226,13 +227,32 @@ class MessageStore:
         messages = await self._ensure_loaded(entity_id)
 
         # Dedup by ID (check recent messages only).
+        # After the chronological-insert change below, ``messages[-50:]`` is
+        # the newest 50 by timestamp (was: the 50 most-recently-inserted).
+        # Improvement: dedup intent was always chronological — a delayed
+        # mesh event re-arriving after a more recent event no longer slips
+        # past the window simply because it landed at the tail.
         msg_id = message.get("id", "")
         if msg_id and any(m.get("id") == msg_id for m in messages[-50:]):
             return
 
-        messages.append(message)
+        # Bisect-insert by timestamp keeps the list chronological even when
+        # a delayed mesh event arrives after a more recent message has
+        # already been stored. Cost: O(log n) lookup + O(n) shift; n is
+        # bounded by ``max_per_conv`` (default 1000), so total cost is
+        # sub-millisecond. ``last_read`` cursor logic (Phases 1+) and
+        # ``get_messages(limit=N)`` semantics depend on ``messages[-1]``
+        # being the chronologically newest message, not the most-recently
+        # inserted one.
+        bisect.insort(
+            messages, message, key=lambda m: m.get("timestamp", "")
+        )
 
         # Enforce per-conversation limit (FIFO trim).
+        # ``messages[-max:]`` now keeps the chronologically newest N — the
+        # correct behaviour, and an upgrade from the prior insertion-order
+        # semantics that could have evicted a recently-arrived but
+        # older-by-timestamp message.
         max_per_conv = self.config_entry.options.get(
             OPT_MAX_MESSAGES_PER_CONVERSATION,
             DEFAULT_MAX_MESSAGES_PER_CONVERSATION,
@@ -243,12 +263,15 @@ class MessageStore:
         self._conversation_dirty.add(entity_id)
         self._schedule_conversation_save(entity_id)
 
-        # Update lightweight index.
+        # Update lightweight index. ``messages[-1]`` is now guaranteed to
+        # be the chronologically newest message in the buffer, which is
+        # what the index is intended to surface.
+        newest = messages[-1]
         self._message_index[entity_id] = {
             "message_count": len(messages),
-            "last_message_ts": message.get("timestamp", ""),
-            "last_sender": message.get("sender", ""),
-            "last_preview": (message.get("text", "") or "")[:50],
+            "last_message_ts": newest.get("timestamp", ""),
+            "last_sender": newest.get("sender", ""),
+            "last_preview": (newest.get("text", "") or "")[:50],
         }
         self._schedule_index_save()
 
