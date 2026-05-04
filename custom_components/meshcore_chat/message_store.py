@@ -359,6 +359,76 @@ class MessageStore:
             return messages[:limit]
         return messages[-limit:]
 
+    async def get_messages_around(
+        self,
+        entity_id: str,
+        anchor_id: str,
+        before_limit: int = 25,
+        after_limit: int = 50,
+    ) -> tuple[list[dict], int, bool, bool, bool]:
+        """Return a window of messages anchored on ``anchor_id``.
+
+        Phase 2 of the last-read-anchor proposal. Used by the panel on
+        conversation open to load a narrow band around the persisted
+        last-read cursor in a single round-trip — typically 25 older +
+        50 newer messages — instead of paging up from the newest 50 to
+        find the unread divider.
+
+        The window is computed against the chronologically-sorted store
+        list (Phase 0 made that ordering reliable via ``bisect.insort``).
+        Slice semantics:
+
+        - ``start = max(0, anchor_idx - before_limit + 1)`` — anchor
+          itself counts as one of the "before" messages so the panel
+          can keep the anchor visible at the bottom of the read history.
+        - ``end = min(len(all), anchor_idx + after_limit + 1)`` — first
+          ``after_limit`` messages strictly newer than the anchor.
+        - ``has_more_before`` / ``has_more_after`` — flags telling the
+          frontend whether to enable the lazy-load triggers in either
+          direction.
+
+        Anchor-not-found path (R3 in the proposal): pruning, manual
+        deletion of ``.storage/meshcore_chat.<entity>.json``, or a future
+        archive feature could orphan the cursor. We fall back to the
+        newest ``(before_limit + after_limit)`` messages with
+        ``anchor_found = False`` so the frontend can render a no-divider
+        view that's identical to a fresh-install open. The total fallback
+        size matches the regular window's max length (75 by default), so
+        the panel never has to special-case the wire shape.
+
+        Returns:
+            ``(window, anchor_index_in_window, has_more_before,
+            has_more_after, anchor_found)``. ``anchor_index_in_window``
+            is the position of ``anchor_id`` inside ``window``; on the
+            anchor-not-found path it's ``len(window)`` so the divider
+            renders at the end of the buffer (which is also the bottom).
+        """
+        all_msgs = await self._ensure_loaded(entity_id)
+        anchor_idx = next(
+            (i for i, m in enumerate(all_msgs) if m.get("id") == anchor_id),
+            None,
+        )
+        if anchor_idx is None:
+            tail = all_msgs[-(before_limit + after_limit):]
+            return (
+                tail,
+                len(tail),
+                len(all_msgs) > len(tail),
+                False,
+                False,
+            )
+
+        start = max(0, anchor_idx - before_limit + 1)
+        end = min(len(all_msgs), anchor_idx + after_limit + 1)
+        window = all_msgs[start:end]
+        return (
+            window,
+            anchor_idx - start,
+            start > 0,
+            end < len(all_msgs),
+            True,
+        )
+
     def get_message_index(self) -> dict[str, dict]:
         """Return the lightweight message index (always in memory)."""
         return self._message_index
