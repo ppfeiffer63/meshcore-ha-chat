@@ -285,6 +285,55 @@ def test_get_store_returns_none_when_unknown(hass: HomeAssistant) -> None:
     assert ws_api._get_store(hass) is None
 
 
+def test_get_store_returns_none_for_foreign_entry(
+    hass: HomeAssistant,
+) -> None:
+    """An entry from another integration (no runtime_data) → None, no crash.
+
+    Regression: Phase 1's ``ws_mark_read`` exposed an AttributeError on
+    the dev host because the panel frontend forwards
+    ``this.config?.entry_id`` (typically the parent ``meshcore``
+    integration's id, NOT the chat companion's). HA's ``ConfigEntry``
+    only materialises ``runtime_data`` for the integration whose setup
+    populated it; a direct attribute read on a foreign entry raises.
+    The ``getattr`` shield collapses that to a clean None.
+    """
+    # Register an entry under a foreign domain — no runtime_data set.
+    foreign = MockConfigEntry(
+        domain="some_other_integration",
+        title="parent meshcore-style entry",
+        entry_id="01FOREIGN_ENTRY",
+        data={},
+        options={},
+    )
+    foreign.add_to_hass(hass)
+    # Must not raise — must return None.
+    assert ws_api._get_store(hass, foreign.entry_id) is None
+
+
+def test_get_store_falls_back_when_foreign_entry_id_passed(
+    hass: HomeAssistant, companion_entry: MockConfigEntry
+) -> None:
+    """Foreign entry_id should NOT short-circuit — explicit miss returns None.
+
+    Pins the contract: ``_get_store`` returns None for an entry_id that
+    resolves to a non-companion entry. Callers that want fall-back-to-
+    first-companion semantics pass ``None`` explicitly (see
+    ``ws_mark_read``); ``_get_store`` itself does not silently retry.
+    """
+    foreign = MockConfigEntry(
+        domain="some_other_integration",
+        entry_id="01FOREIGN_ENTRY",
+        data={},
+        options={},
+    )
+    foreign.add_to_hass(hass)
+    # Companion entry exists, but explicit foreign id is honored as a miss.
+    assert ws_api._get_store(hass, foreign.entry_id) is None
+    # None still uses the fallback to companion_entry.
+    assert ws_api._get_store(hass, None) is companion_entry.runtime_data.store
+
+
 # ─── ws_get_devices ─────────────────────────────────────────────────────
 
 
@@ -1435,6 +1484,60 @@ async def test_mark_read_snapshot_uses_get_messages(
     tracker.set_last_read.assert_awaited_once_with(
         "binary_sensor.alice", "msg_chronologically_newest"
     )
+
+
+async def test_mark_read_with_foreign_entry_id_still_snapshots(
+    hass: HomeAssistant, companion_entry: MockConfigEntry
+) -> None:
+    """Frontend-passed foreign entry_id must not block the cursor snapshot.
+
+    Regression: the chat panel forwards ``this.config?.entry_id`` to
+    every WS handler, and on the dev host that resolves to the parent
+    ``meshcore`` integration's entry id — not the chat companion's.
+    Before this fix, ``ws_mark_read`` propagated that id into
+    ``_get_store`` and the snapshot path crashed with AttributeError.
+    The handler now ignores the inbound ``entry_id`` and uses the
+    fallback (``_get_store(hass, None)``) to find the chat companion's
+    store deterministically.
+    """
+    tracker = MagicMock()
+    tracker.mark_read = AsyncMock()
+    tracker.set_last_read = AsyncMock()
+    hass.data[DOMAIN] = {"unread_tracker": tracker}
+
+    companion_entry.runtime_data.store.get_messages = AsyncMock(
+        return_value=[{"id": "msg_42"}]
+    )
+
+    # Foreign entry registered alongside the companion entry — mimics the
+    # parent meshcore integration on the dev host.
+    foreign = MockConfigEntry(
+        domain="some_other_integration",
+        entry_id="01FOREIGN_PARENT",
+        data={},
+        options={},
+    )
+    foreign.add_to_hass(hass)
+
+    conn = _Connection()
+    await _call_ws(
+        ws_api.ws_mark_read,
+        hass,
+        conn,
+        {
+            "id": 1,
+            "entity_id": "binary_sensor.alice",
+            # Frontend (incorrectly, historically) sends the parent's id.
+            "entry_id": foreign.entry_id,
+        },
+    )
+
+    # No crash; cursor still advances against the chat companion store.
+    tracker.mark_read.assert_awaited_once_with("binary_sensor.alice")
+    tracker.set_last_read.assert_awaited_once_with(
+        "binary_sensor.alice", "msg_42"
+    )
+    assert conn.results[0][1] == {"success": True}
 
 
 async def test_mark_read_with_no_messages_no_op(

@@ -308,16 +308,30 @@ def _get_store(
     (typically a singleton per HA instance because the panel is installed
     once). When omitted, falls back to the first companion config entry
     that has a runtime_data store.
+
+    Defensive ``getattr`` shields the isinstance check from entries
+    belonging to other integrations: HA's ``ConfigEntry`` only
+    materialises ``runtime_data`` on the entry whose setup populated it,
+    so a direct attribute read on a non-companion entry raises
+    AttributeError. Frontend call sites occasionally pass the parent
+    ``meshcore`` integration's entry_id (rather than the chat
+    companion's) — bringing that down the same code path was the source
+    of the Phase 1 dev-host runtime crash; ``getattr`` collapses the
+    miss to a clean None.
     """
     if entry_id:
         entry = hass.config_entries.async_get_entry(entry_id)
-        if entry and isinstance(entry.runtime_data, MeshCoreChatRuntimeData):
+        if entry and isinstance(
+            getattr(entry, "runtime_data", None), MeshCoreChatRuntimeData
+        ):
             return entry.runtime_data.store
         return None
 
     # Fallback: first companion entry with a store.
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if isinstance(entry.runtime_data, MeshCoreChatRuntimeData):
+        if isinstance(
+            getattr(entry, "runtime_data", None), MeshCoreChatRuntimeData
+        ):
             return entry.runtime_data.store
     return None
 
@@ -1731,9 +1745,20 @@ async def ws_mark_read(hass, connection, msg):
     via ``bisect.insort``). If the conversation has no stored messages
     yet (``recent`` empty), the cursor is left untouched — defensive
     no-op so the ``ack``-style success response still fires.
+
+    The ``entry_id`` field on the inbound WS message is intentionally
+    NOT forwarded to ``_get_store``: the chat panel's frontend often
+    populates that field with the parent ``meshcore`` integration's
+    entry id (the panel was originally configured against that), but
+    this handler needs the chat companion's store. The chat companion
+    is single-instance per its config flow, so the ``None``-fallback
+    branch in ``_get_store`` deterministically resolves to the right
+    store. Accepting the field keeps the WS schema backwards-
+    compatible.
     """
     tracker = hass.data.get(DOMAIN, {}).get("unread_tracker")
-    store = _get_store(hass, msg.get("entry_id"))
+    # Always use the fallback — see the docstring for the rationale.
+    store = _get_store(hass, None)
     if tracker:
         await tracker.mark_read(msg["entity_id"])
         if store is not None:
