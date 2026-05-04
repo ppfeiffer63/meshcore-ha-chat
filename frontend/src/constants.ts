@@ -103,3 +103,22 @@ export const AT_BOTTOM_THRESHOLD_PX = 150;
  * hard-coding the number.
  */
 export const LAST_READ_SAVE_DEBOUNCE_MS = 2000;
+
+/**
+ * Mark-read grace period after a conversation switch (Phase 4).
+ *
+ * R1 mitigation per `Proposed - Last-Read Anchor and Read-Receipt
+ * Refinement for Chat Panel.md` §"Risks". The new viewport-based
+ * mark-read trigger fires whenever scroll is near-bottom AND
+ * `hasNewerMessages === false`. For low-unread conversations the
+ * post-anchor scroll lands the user near the bottom immediately —
+ * without a grace period the cursor would advance the instant the
+ * conversation opens, even if the user immediately scrolls UP without
+ * reading.
+ *
+ * Phase 4's `_onChatScroll` arms a one-shot timer of this duration on
+ * every conversation switch; the FIRST auto-mark-read after the switch
+ * waits for the timer to elapse. Subsequent mark-reads in the same
+ * conversation fire without delay.
+ */
+export const MARK_READ_GRACE_PERIOD_MS = 1000;
