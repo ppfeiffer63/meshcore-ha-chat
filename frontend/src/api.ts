@@ -519,6 +519,68 @@ export async function markConversationRead(
   } catch { return { success: false }; }
 }
 
+// ─── Last-read anchor (Phase 2 backend / Phase 3 frontend) ────────────────
+
+/**
+ * Backend response shape for ``meshcore_chat/get_messages_around``.
+ *
+ * Mirrors ``ws_get_messages_around`` (Phase 2, commit 55dc791). The
+ * window includes the anchor message itself; ``anchor_index`` is the
+ * anchor's offset within ``messages``. ``has_more_before`` /
+ * ``has_more_after`` drive the symmetric lazy-load triggers in
+ * ``MessageStore.loadOlderMessages`` / ``loadNewerMessages``.
+ *
+ * R3 fallback: when the anchor isn't present in the conversation
+ * (pruned / fresh install / entity rename), the backend returns the
+ * newest ``before_limit + after_limit`` messages with
+ * ``anchor_found: false`` and ``anchor_index: messages.length`` (panel
+ * renders the divider at the bottom of the buffer).
+ */
+export interface MessagesAroundResponse {
+  messages: StoredMessage[];
+  anchor_index: number;
+  has_more_before: boolean;
+  has_more_after: boolean;
+  anchor_found: boolean;
+}
+
+/**
+ * Fetch a window of messages around an anchor message ID.
+ *
+ * Phase 3 thin wrapper around ``meshcore_chat/get_messages_around``
+ * (Phase 2 backend). Used by ``MessageStore.switchEntity(entityId,
+ * anchorId)`` to load the "last-read window" — ``beforeLimit`` messages
+ * older than the anchor + ``afterLimit`` messages newer than it, in a
+ * single round-trip.
+ *
+ * Defaults match the proposal: 25 older + 50 newer. Both limits are
+ * passed as WS payload keys (the schema is keyed via ``vol.Optional``,
+ * not positional — see Phase 2 caveat in the proposal handoff).
+ *
+ * Mirrors ``markConversationRead`` shape (no try/catch swallow — the
+ * caller decides how to handle a network failure; ``MessageStore``
+ * surfaces it as ``this._error``). The intentional unswallowed reject
+ * differs from helpers like ``getStoredMessages`` (which return a
+ * fallback empty payload) because anchor-driven open is a UX-critical
+ * path that must surface failures rather than silently render the
+ * wrong (empty) window.
+ */
+export async function getMessagesAround(
+  hass: HomeAssistant,
+  entityId: string,
+  anchorId: string,
+  beforeLimit = 25,
+  afterLimit = 50,
+): Promise<MessagesAroundResponse> {
+  return hass.callWS<MessagesAroundResponse>({
+    type: 'meshcore_chat/get_messages_around',
+    entity_id: entityId,
+    anchor_id: anchorId,
+    before_limit: beforeLimit,
+    after_limit: afterLimit,
+  });
+}
+
 // ─── Identity Management ─────────────────────────────────────────────────
 
 /**
