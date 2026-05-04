@@ -1686,12 +1686,28 @@ async def ws_cleanup_stale_neighbors(hass, connection, msg):
 )
 @callback
 def ws_get_unread_counts(hass, connection, msg):
-    """Get all unread message counts."""
+    """Get all unread message counts plus the persisted last-read cursors.
+
+    Phase 1 (proposal Change 4): the payload now includes a ``last_read``
+    map alongside ``unread`` so the panel can populate both badge counts
+    and per-conversation anchors in a single round-trip on connect.
+    Older clients that only read ``unread`` continue to work — the new
+    field is additive.
+    """
     tracker = hass.data.get(DOMAIN, {}).get("unread_tracker")
     if not tracker:
-        connection.send_result(msg["id"], {"unread": {}})
+        # Empty maps for both fields keeps the wire shape stable for
+        # frontends written against the new schema, regardless of
+        # whether the tracker is initialised.
+        connection.send_result(msg["id"], {"unread": {}, "last_read": {}})
         return
-    connection.send_result(msg["id"], {"unread": tracker.get_all_unread()})
+    connection.send_result(
+        msg["id"],
+        {
+            "unread": tracker.get_all_unread(),
+            "last_read": tracker.get_all_last_read(),
+        },
+    )
 
 
 @websocket_api.websocket_command(
@@ -1703,10 +1719,29 @@ def ws_get_unread_counts(hass, connection, msg):
 )
 @websocket_api.async_response
 async def ws_mark_read(hass, connection, msg):
-    """Mark a conversation as read."""
+    """Mark a conversation as read and snapshot the last-read cursor.
+
+    Phase 1 (proposal Change 3): in addition to clearing the in-memory
+    unread count, snapshot the newest stored message id at this moment
+    as the persistent read cursor. The cursor is what Phase 2's
+    ``get_messages_around`` endpoint anchors on.
+
+    ``get_messages(limit=1)`` returns ``messages[-1:]`` from the
+    chronologically-sorted store (Phase 0 made that ordering reliable
+    via ``bisect.insort``). If the conversation has no stored messages
+    yet (``recent`` empty), the cursor is left untouched — defensive
+    no-op so the ``ack``-style success response still fires.
+    """
     tracker = hass.data.get(DOMAIN, {}).get("unread_tracker")
+    store = _get_store(hass, msg.get("entry_id"))
     if tracker:
         await tracker.mark_read(msg["entity_id"])
+        if store is not None:
+            recent = await store.get_messages(msg["entity_id"], limit=1)
+            if recent:
+                await tracker.set_last_read(
+                    msg["entity_id"], recent[0]["id"]
+                )
     connection.send_result(msg["id"], {"success": True})
 
 
