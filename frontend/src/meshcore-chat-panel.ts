@@ -46,6 +46,27 @@ export class MeshCorePanel extends LitElement {
   /** Entity ID of the conversation currently being viewed in chat. */
   private _activeChatEntityId: string | null = null;
 
+  // Phase 3 (A.3) — custom dropdown for the multi-entry device switcher.
+  // Replaces the native <select> so each option can render name + pubkey
+  // prefix on two visual lines, and so the collapsed display does not
+  // duplicate the prefix (a native <select>'s collapsed text is
+  // necessarily the selected <option>'s text). Document-level click and
+  // keydown listeners are attached lazily when the menu opens and torn
+  // down when it closes (or in disconnectedCallback).
+  @state() private _deviceDropdownOpen = false;
+  private _onDocClickForDropdown = (e: MouseEvent) => {
+    // If the click landed inside the dropdown (button or menu), the
+    // option click handler already runs; we only close on truly-outside
+    // clicks.
+    const path = (e.composedPath ? e.composedPath() : []) as EventTarget[];
+    const root = this.shadowRoot?.querySelector('.device-info-wrap');
+    if (root && path.includes(root)) return;
+    this._closeDeviceDropdown();
+  };
+  private _onDocKeyForDropdown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') this._closeDeviceDropdown();
+  };
+
   // Trace-result dialog state.  Opened from the 'trace' action handler; the
   // dialog closes itself via a trace-dialog-closed event.
   @state() private _traceDialogOpen = false;
@@ -108,33 +129,51 @@ export class MeshCorePanel extends LitElement {
         color: var(--secondary-text-color);
       }
 
-      .device-switcher {
-        padding: 8px 12px;
-        border: 1px solid var(--divider-color, #e0e0e0);
-        border-radius: 8px;
-        background: var(--card-background-color, #fff);
-        color: var(--primary-text-color);
-        font-size: 13px;
-        box-sizing: border-box;
-        height: 39px;
-        min-height: 39px;
-        line-height: normal;
-        appearance: menulist;
-        -webkit-appearance: menulist;
-        cursor: pointer;
-        max-width: 250px;
-      }
-
-      /* Phase 3 (A.3): wrap header device name + pubkey prefix as flex
-         siblings so the live pubkey is always visible alongside the
-         user-set name (forensics F-A: name and keys are independent
-         fields by firmware design). */
+      /* Phase 3 (A.3): the multi-entry device switcher is a custom
+         dropdown (button + listbox) instead of a native <select>, so
+         each option can render name + pubkey-prefix as separate
+         visual lines and so the collapsed display does not duplicate
+         the prefix. The single-entry case shares the same wrap class
+         and same name+prefix sibling layout. Forensics F-A: node_name
+         and identity keys are independent fields by firmware design;
+         showing both makes the distinction visible to the user. */
       .device-info-wrap {
+        position: relative; /* anchor for the absolutely-positioned menu */
         display: inline-flex;
         flex-direction: row;
         align-items: baseline;
         gap: 6px;
         min-width: 0; /* allow children to shrink in narrow header */
+      }
+
+      .device-switcher {
+        display: inline-flex;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 6px;
+        padding: 8px 12px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px;
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        font: inherit;
+        font-size: 13px;
+        text-align: left;
+        box-sizing: border-box;
+        min-height: 39px;
+        line-height: normal;
+        cursor: pointer;
+        max-width: 250px;
+      }
+
+      .device-switcher:hover {
+        background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+      }
+
+      .device-switcher-caret {
+        margin-left: 4px;
+        opacity: 0.6;
+        font-size: 11px;
       }
 
       .device-prefix {
@@ -143,14 +182,58 @@ export class MeshCorePanel extends LitElement {
         white-space: nowrap;
       }
 
-      /* Mobile / narrow header: stack name and prefix vertically.
+      .device-switcher-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        z-index: 10;
+        margin: 0;
+        padding: 4px 0;
+        list-style: none;
+        min-width: max(180px, 100%);
+        max-width: 280px;
+        background: var(--card-background-color, #fff);
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      }
+
+      .device-switcher-menu li {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 8px 12px;
+        cursor: pointer;
+        gap: 0;
+      }
+
+      .device-switcher-menu li:hover {
+        background: var(--secondary-background-color, rgba(0, 0, 0, 0.05));
+      }
+
+      .device-switcher-menu li.active {
+        background: rgba(3, 169, 244, 0.1);
+      }
+
+      .device-switcher-menu li .device-name {
+        font-size: 13px;
+        line-height: 1.2;
+      }
+
+      .device-switcher-menu li .device-prefix {
+        line-height: 1.1;
+      }
+
+      /* Mobile / narrow header: stack name and prefix vertically inside
+         the button (multi-entry) and inside the wrap (single-entry).
          Two gates fire this: the panel's own [narrow] attribute (set by
          HA's responsive sidebar via the reflected 'narrow' property)
          and a viewport media query as a fallback for desktop browsers
          in narrow viewports. The :host([narrow]) and @media blocks are
          duplicated rather than comma-combined because CSS does not
          allow mixing a selector with an at-rule in a single rule list. */
-      :host([narrow]) .device-info-wrap {
+      :host([narrow]) .device-info-wrap,
+      :host([narrow]) .device-switcher {
         flex-direction: column;
         align-items: flex-end;
         gap: 0;
@@ -161,7 +244,8 @@ export class MeshCorePanel extends LitElement {
       }
 
       @media (max-width: 480px) {
-        .device-info-wrap {
+        .device-info-wrap,
+        .device-switcher {
           flex-direction: column;
           align-items: flex-end;
           gap: 0;
@@ -417,6 +501,41 @@ export class MeshCorePanel extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._teardownSubscriptions();
+    this._closeDeviceDropdown();
+  }
+
+  private _toggleDeviceDropdown() {
+    if (this._deviceDropdownOpen) {
+      this._closeDeviceDropdown();
+    } else {
+      this._openDeviceDropdown();
+    }
+  }
+
+  private _openDeviceDropdown() {
+    if (this._deviceDropdownOpen) return;
+    this._deviceDropdownOpen = true;
+    // Listen on the next tick so the click that opened the menu does
+    // not immediately close it via the document handler.
+    setTimeout(() => {
+      document.addEventListener('click', this._onDocClickForDropdown, true);
+      document.addEventListener('keydown', this._onDocKeyForDropdown, true);
+    }, 0);
+  }
+
+  private _closeDeviceDropdown() {
+    if (!this._deviceDropdownOpen) return;
+    this._deviceDropdownOpen = false;
+    document.removeEventListener('click', this._onDocClickForDropdown, true);
+    document.removeEventListener('keydown', this._onDocKeyForDropdown, true);
+  }
+
+  private _selectDevice(entryId: string) {
+    if (entryId !== this._selectedEntryId) {
+      this._selectedEntryId = entryId;
+      this._loadDeviceData();
+    }
+    this._closeDeviceDropdown();
   }
 
   /**
@@ -560,19 +679,40 @@ export class MeshCorePanel extends LitElement {
             ${this._devices.length > 1
               ? html`
                   <div class="device-info-wrap">
-                    <select
+                    <button
+                      type="button"
                       class="device-switcher"
-                      .value=${this._selectedEntryId || ''}
-                      @change=${this._onDeviceChange}>
-                      ${this._devices.map(
-                        (d) => html`
-                          <option value=${d.entry_id}>
-                            ${d.name} (${d.pubkey_prefix?.substring(0, 6) || '?'})${d.connected ? '' : ' — offline'}
-                          </option>
-                        `,
-                      )}
-                    </select>
-                    <span class="device-prefix">(${device?.pubkey_prefix?.substring(0, 6) || ''})</span>
+                      aria-haspopup="listbox"
+                      aria-expanded=${this._deviceDropdownOpen ? 'true' : 'false'}
+                      @click=${this._toggleDeviceDropdown}>
+                      <span class="device-name">${device?.name || ''}</span>
+                      <span class="device-prefix">(${device?.pubkey_prefix?.substring(0, 6) || ''})</span>
+                      <span class="device-switcher-caret" aria-hidden="true">▾</span>
+                    </button>
+                    ${this._deviceDropdownOpen
+                      ? html`
+                          <ul class="device-switcher-menu" role="listbox">
+                            ${this._devices.map(
+                              (d) => html`
+                                <li
+                                  role="option"
+                                  aria-selected=${d.entry_id === this._selectedEntryId
+                                    ? 'true'
+                                    : 'false'}
+                                  class=${d.entry_id === this._selectedEntryId ? 'active' : ''}
+                                  @click=${() => this._selectDevice(d.entry_id)}>
+                                  <span class="device-name">
+                                    ${d.name}${d.connected ? '' : ' — offline'}
+                                  </span>
+                                  <span class="device-prefix">
+                                    (${d.pubkey_prefix?.substring(0, 6) || '?'})
+                                  </span>
+                                </li>
+                              `,
+                            )}
+                          </ul>
+                        `
+                      : ''}
                   </div>
                 `
               : html`
@@ -720,13 +860,6 @@ export class MeshCorePanel extends LitElement {
     if (!state || state.state === 'unknown' || state.state === 'unavailable') return null;
     const val = parseFloat(state.state);
     return isNaN(val) ? null : Math.round(val);
-  }
-
-  private _onDeviceChange(e: Event) {
-    const sel = e.target as HTMLSelectElement;
-    this._selectedEntryId = sel.value || null;
-    // Reload contacts and channels for the new device
-    this._loadDeviceData();
   }
 
   private async _loadData() {
