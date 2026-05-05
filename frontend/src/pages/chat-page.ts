@@ -537,6 +537,7 @@ export class ChatPage extends LitElement {
               .conversations=${this.conversations}
               .activeId=${this.selectedId}
               .unreadCounts=${this.unreadCounts}
+              .nodePrefix=${this.config?.node_prefix || null}
               @conversation-selected=${(e: CustomEvent) => {
                 const newId = e.detail.id;
                 if (newId === this.selectedId) {
@@ -570,6 +571,7 @@ export class ChatPage extends LitElement {
           .conversations=${this.conversations}
           .activeId=${this.selectedId}
           .unreadCounts=${this.unreadCounts}
+          .nodePrefix=${this.config?.node_prefix || null}
           @conversation-selected=${(e: CustomEvent) => {
             const newId = e.detail.id;
             if (newId === this.selectedId) {
@@ -1301,14 +1303,23 @@ export class ChatPage extends LitElement {
     if (this._currentEntityId && this.unreadCounts[this._currentEntityId]) {
       return this.unreadCounts[this._currentEntityId];
     }
-    // Fallback: match using entity naming patterns
+    // Fallback: match using entity naming patterns.
+    // Phase 4 (F-B): Channel matches require the node_prefix to avoid
+    // cross-entry contamination on same-numbered channels. When node_prefix
+    // is unavailable (initial render before config arrives, or single-entry
+    // installs), fall back to suffix-only match for back-compat.
+    const nodePrefix = this.config?.node_prefix;
     for (const [entityId, count] of Object.entries(this.unreadCounts)) {
       if (count <= 0) continue;
       if (/^\d+$/.test(this.selectedId)) {
-        // Channel: match _ch_{idx}_messages
-        if (entityId.endsWith(`_ch_${this.selectedId}_messages`)) return count;
+        // Channel: match _ch_{idx}_messages, scoped by node_prefix when known
+        if (nodePrefix) {
+          if (entityId.endsWith(`meshcore_${nodePrefix}_ch_${this.selectedId}_messages`)) return count;
+        } else if (entityId.endsWith(`_ch_${this.selectedId}_messages`)) {
+          return count;
+        }
       } else {
-        // Contact: match _{first6chars}_messages
+        // Contact: match _{first6chars}_messages (globally unique)
         const prefix6 = this.selectedId.substring(0, 6);
         if (entityId.endsWith(`_${prefix6}_messages`)) return count;
       }

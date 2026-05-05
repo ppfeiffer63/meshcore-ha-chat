@@ -1716,13 +1716,23 @@ async def ws_cleanup_stale_neighbors(hass, connection, msg):
 )
 @callback
 def ws_get_unread_counts(hass, connection, msg):
-    """Get all unread message counts plus the persisted last-read cursors.
+    """Return unread counts and last-read cursors, optionally scoped to one entry.
 
     Phase 1 (proposal Change 4): the payload now includes a ``last_read``
     map alongside ``unread`` so the panel can populate both badge counts
     and per-conversation anchors in a single round-trip on connect.
     Older clients that only read ``unread`` continue to work — the new
     field is additive.
+
+    Phase 4 (Multi-Entry Switching, F-B): when ``entry_id`` is supplied
+    and resolves to a known upstream coordinator (via Phase 2's tightened
+    ``_resolve_coordinator``), the returned maps are filtered to
+    entity_ids that belong to that coordinator (matched by the
+    ``.meshcore_<pubkey-prefix>_`` segment). Unknown ``entry_id`` triggers
+    Phase 2's warning + None and we return empty maps so the panel
+    surfaces a clean empty state instead of cross-contaminated counts
+    from other entries. Omitted ``entry_id`` returns the full
+    process-wide map (legacy / cross-entry rollup callers).
     """
     tracker = hass.data.get(DOMAIN, {}).get("unread_tracker")
     if not tracker:
@@ -1731,13 +1741,28 @@ def ws_get_unread_counts(hass, connection, msg):
         # whether the tracker is initialised.
         connection.send_result(msg["id"], {"unread": {}, "last_read": {}})
         return
-    connection.send_result(
-        msg["id"],
-        {
-            "unread": tracker.get_all_unread(),
-            "last_read": tracker.get_all_last_read(),
-        },
-    )
+    unread = tracker.get_all_unread()
+    last_read = tracker.get_all_last_read()
+    entry_id = msg.get("entry_id")
+    if entry_id is not None:
+        coord = _resolve_coordinator(hass, entry_id)
+        if coord is None:
+            # Phase 2 already logged the warning; respond with empty.
+            connection.send_result(msg["id"], {"unread": {}, "last_read": {}})
+            return
+        prefix = (getattr(coord, "pubkey", "") or "")[:6]
+        if prefix:
+            # Match the domain-boundary segment ".meshcore_<prefix>_"
+            # against entity_ids of the form
+            # "<domain>.meshcore_<prefix>_..._messages".
+            # NOTE: diverges from the proposal text which used
+            # "_meshcore_<prefix>_"; that pattern would never match
+            # because the character preceding "meshcore" in real
+            # entity_ids is the domain separator ".", not "_".
+            needle = f".meshcore_{prefix}_"
+            unread = {k: v for k, v in unread.items() if needle in k}
+            last_read = {k: v for k, v in last_read.items() if needle in k}
+    connection.send_result(msg["id"], {"unread": unread, "last_read": last_read})
 
 
 @websocket_api.websocket_command(
