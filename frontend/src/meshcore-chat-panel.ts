@@ -15,7 +15,7 @@ import './components/target-picker';
 @customElement('meshcore-chat-panel')
 export class MeshCorePanel extends LitElement {
   @property({ type: Object }) hass?: HomeAssistant;
-  @property({ type: Boolean }) narrow = false;
+  @property({ type: Boolean, reflect: true }) narrow = false;
   @property({ type: Object }) panel?: Record<string, unknown>;
 
   @state() private _config: PanelConfig | null = null;
@@ -123,6 +123,52 @@ export class MeshCorePanel extends LitElement {
         -webkit-appearance: menulist;
         cursor: pointer;
         max-width: 250px;
+      }
+
+      /* Phase 3 (A.3): wrap header device name + pubkey prefix as flex
+         siblings so the live pubkey is always visible alongside the
+         user-set name (forensics F-A: name and keys are independent
+         fields by firmware design). */
+      .device-info-wrap {
+        display: inline-flex;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0; /* allow children to shrink in narrow header */
+      }
+
+      .device-prefix {
+        font-size: 0.85em;
+        opacity: 0.75;
+        white-space: nowrap;
+      }
+
+      /* Mobile / narrow header: stack name and prefix vertically.
+         Two gates fire this: the panel's own [narrow] attribute (set by
+         HA's responsive sidebar via the reflected 'narrow' property)
+         and a viewport media query as a fallback for desktop browsers
+         in narrow viewports. The :host([narrow]) and @media blocks are
+         duplicated rather than comma-combined because CSS does not
+         allow mixing a selector with an at-rule in a single rule list. */
+      :host([narrow]) .device-info-wrap {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0;
+      }
+
+      :host([narrow]) .device-prefix {
+        line-height: 1.1;
+      }
+
+      @media (max-width: 480px) {
+        .device-info-wrap {
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 0;
+        }
+        .device-prefix {
+          line-height: 1.1;
+        }
       }
 
       .menu-icon {
@@ -513,20 +559,28 @@ export class MeshCorePanel extends LitElement {
               : html``}
             ${this._devices.length > 1
               ? html`
-                  <select
-                    class="device-switcher"
-                    .value=${this._selectedEntryId || ''}
-                    @change=${this._onDeviceChange}>
-                    ${this._devices.map(
-                      (d) => html`
-                        <option value=${d.entry_id}>
-                          ${d.name} ${d.connected ? '' : '(offline)'}
-                        </option>
-                      `,
-                    )}
-                  </select>
+                  <div class="device-info-wrap">
+                    <select
+                      class="device-switcher"
+                      .value=${this._selectedEntryId || ''}
+                      @change=${this._onDeviceChange}>
+                      ${this._devices.map(
+                        (d) => html`
+                          <option value=${d.entry_id}>
+                            ${d.name} (${d.pubkey_prefix?.substring(0, 6) || '?'})${d.connected ? '' : ' — offline'}
+                          </option>
+                        `,
+                      )}
+                    </select>
+                    <span class="device-prefix">(${device?.pubkey_prefix?.substring(0, 6) || ''})</span>
+                  </div>
                 `
-              : html`<span class="device-info">${device?.name || ''}</span>`}
+              : html`
+                  <div class="device-info-wrap">
+                    <span class="device-name">${device?.name || ''}</span>
+                    <span class="device-prefix">(${device?.pubkey_prefix?.substring(0, 6) || ''})</span>
+                  </div>
+                `}
           </div>
         </div>
 
