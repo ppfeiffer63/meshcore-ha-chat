@@ -609,6 +609,7 @@ export class MeshCorePanel extends LitElement {
         return html`
           <meshcore-nodes-page
             .hass=${this.hass}
+            .config=${this._config}
             .contacts=${this._contacts}
             .channels=${this._channels}
             .narrow=${this.narrow}
