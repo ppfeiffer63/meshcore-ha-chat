@@ -131,6 +131,18 @@ def _resolve_coordinator(hass: HomeAssistant, entry_id: str | None = None):
       - ``entry_id`` omitted (None) → fall back to first coordinator.
         This is the legitimate "I don't care which one" path used by
         commands that operate on singleton state.
+
+    Note on scope (Phase 5, Change 4 / forensics §F-D Fix D.3): this
+    hardening only protects code paths that actually call
+    ``_get_coordinator(...)`` / ``_resolve_coordinator(...)``. Handlers
+    that accept ``entry_id`` in their schema but ignore it at the body
+    level (SILENT-IGNORE — caught by
+    ``tests/components/meshcore_chat/test_ws_api_entry_id_audit.py``)
+    or route through a different resolver (e.g., ``_get_store`` — see
+    its symmetric Phase 5 hardening for the chat-companion lookup)
+    need their own coverage. See
+    ``docs/Forensics - Multi-Entry Switching Analysis.md`` §F-C and
+    §F-D for the full audit and gap analysis.
     """
     if MESHCORE_DOMAIN not in hass.data:
         return None
@@ -333,14 +345,35 @@ def _get_store(
     companion's) — bringing that down the same code path was the source
     of the Phase 1 dev-host runtime crash; ``getattr`` collapses the
     miss to a clean None.
+
+    Behavior (Phase 5, Change 3 / forensics §F-D Fix D.1 hardening):
+      - ``entry_id`` supplied and resolves to a chat-companion entry
+        → return its store.
+      - ``entry_id`` supplied but does NOT resolve to a chat-companion
+        entry → log WARNING and return None. Mirrors Phase 2's
+        ``_resolve_coordinator`` hardening for the parallel chat-
+        companion lookup path. Pre-Phase-5 this branch silently
+        returned None, masking wrong-shape entry_ids (the F-C
+        Category 4 latent class).
+      - ``entry_id`` omitted (``None``) → fall back to first companion
+        entry with a store. This is the legitimate path used by
+        ``ws_mark_read`` / ``ws_get_messages_around`` and the three
+        Category-4 handlers (``ws_get_stored_messages``,
+        ``ws_get_stored_message_count``, ``ws_search_stored_messages``)
+        whose Phase 5 documented-ignore conversion forces the
+        ``None``-fallback explicitly.
     """
-    if entry_id:
+    if entry_id is not None:
         entry = hass.config_entries.async_get_entry(entry_id)
-        if entry and isinstance(
+        if entry is None or not isinstance(
             getattr(entry, "runtime_data", None), MeshCoreChatRuntimeData
         ):
-            return entry.runtime_data.store
-        return None
+            _LOGGER.warning(
+                "ws_api _get_store received entry_id %r that is not a chat companion entry",
+                entry_id,
+            )
+            return None
+        return entry.runtime_data.store
 
     # Fallback: first companion entry with a store.
     for entry in hass.config_entries.async_entries(DOMAIN):
@@ -2739,10 +2772,21 @@ async def ws_get_stored_messages(
     """Get stored messages for a conversation with cursor pagination.
 
     Routes through the *companion's* MessageStore (per-entry; lives on
-    hass.data[DOMAIN]), not the upstream coordinator. ``entry_id`` here
-    is the companion's entry id (typically a singleton).
+    hass.data[DOMAIN]), not the upstream coordinator.
+
+    The inbound ``entry_id`` field is intentionally NOT forwarded to
+    ``_get_store`` — it stays on the schema for backwards compatibility
+    but the handler always uses the ``None``-fallback branch. Same
+    reason as ``ws_mark_read`` / ``ws_get_messages_around``: the chat
+    panel's frontend forwards ``this.config?.entry_id`` to every WS
+    handler, and that resolves to the parent ``meshcore`` integration's
+    entry id rather than the chat companion's. The chat companion is
+    single-instance per its config flow, so the fallback resolves
+    deterministically. See forensics §F-C Category 4 for the audit
+    that surfaced this latent shape mismatch.
     """
-    store = _get_store(hass, msg.get("entry_id"))
+    # Always use the fallback — see the docstring for the rationale.
+    store = _get_store(hass, None)
     if store is None:
         connection.send_error(
             msg["id"], "not_found", "No MeshCore Chat message store found"
@@ -2778,8 +2822,18 @@ def ws_get_stored_message_count(
     """Get message count for a conversation from the in-memory index.
 
     Routes through the companion's MessageStore.
+
+    The inbound ``entry_id`` field is intentionally NOT forwarded to
+    ``_get_store`` — it stays on the schema for backwards compatibility
+    but the handler always uses the ``None``-fallback branch. Same
+    reason as ``ws_mark_read`` / ``ws_get_messages_around``: the chat
+    panel's frontend forwards the parent ``meshcore`` integration's
+    entry id, not the chat companion's. The chat companion is single-
+    instance per its config flow, so the fallback resolves
+    deterministically. See forensics §F-C Category 4.
     """
-    store = _get_store(hass, msg.get("entry_id"))
+    # Always use the fallback — see the docstring for the rationale.
+    store = _get_store(hass, None)
     if store is None:
         connection.send_error(
             msg["id"], "not_found", "No MeshCore Chat message store found"
@@ -2813,8 +2867,18 @@ async def ws_search_stored_messages(
 
     Uses _load_for_search() for non-caching disk reads — conversations
     loaded solely for search are not kept in memory after the call returns.
+
+    The inbound ``entry_id`` field is intentionally NOT forwarded to
+    ``_get_store`` — it stays on the schema for backwards compatibility
+    but the handler always uses the ``None``-fallback branch. Same
+    reason as ``ws_mark_read`` / ``ws_get_messages_around``: the chat
+    panel's frontend forwards the parent ``meshcore`` integration's
+    entry id, not the chat companion's. The chat companion is single-
+    instance per its config flow, so the fallback resolves
+    deterministically. See forensics §F-C Category 4.
     """
-    store = _get_store(hass, msg.get("entry_id"))
+    # Always use the fallback — see the docstring for the rationale.
+    store = _get_store(hass, None)
     if store is None:
         connection.send_error(
             msg["id"], "not_found", "No MeshCore Chat message store found"
