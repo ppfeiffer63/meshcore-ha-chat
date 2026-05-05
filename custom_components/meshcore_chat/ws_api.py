@@ -120,18 +120,33 @@ def _resolve_coordinator(hass: HomeAssistant, entry_id: str | None = None):
     inner helper is what callers use when they need the discovery result
     without triggering the issue create/delete (currently only the
     wrapper itself).
+
+    Behavior:
+      - ``entry_id`` supplied and matches a registered coordinator → return it.
+      - ``entry_id`` supplied but no match → log WARNING and return None.
+        This is a frontend bug (wrong field passed as entry_id, stale
+        entry_id after an upstream entry was removed, etc.) and should
+        surface as a ``not_found`` WS error, not silently masquerade as
+        the first coordinator.
+      - ``entry_id`` omitted (None) → fall back to first coordinator.
+        This is the legitimate "I don't care which one" path used by
+        commands that operate on singleton state.
     """
     if MESHCORE_DOMAIN not in hass.data:
         return None
 
-    if entry_id and entry_id in hass.data[MESHCORE_DOMAIN]:
-        coord = hass.data[MESHCORE_DOMAIN][entry_id]
-        if hasattr(coord, "api"):
-            return coord
-        return None
+    if entry_id is not None:
+        coord = hass.data[MESHCORE_DOMAIN].get(entry_id)
+        if coord is None:
+            _LOGGER.warning(
+                "ws_api received unknown entry_id %r; valid: %s",
+                entry_id, list(hass.data[MESHCORE_DOMAIN]),
+            )
+            return None
+        return coord if hasattr(coord, "api") else None
 
-    # Return first coordinator found
-    for key, value in hass.data[MESHCORE_DOMAIN].items():
+    # entry_id explicitly omitted — fall back to first coordinator.
+    for value in hass.data[MESHCORE_DOMAIN].values():
         if hasattr(value, "api"):
             return value
     return None
