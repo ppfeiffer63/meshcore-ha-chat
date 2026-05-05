@@ -8030,15 +8030,18 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
         position: relative; /* anchor for the absolutely-positioned menu */
         display: inline-flex;
         flex-direction: row;
-        align-items: baseline;
+        align-items: center;
+        justify-content: center;
         gap: 6px;
         min-width: 0; /* allow children to shrink in narrow header */
       }
 
       .device-switcher {
+        position: relative; /* anchor for absolute caret in column mode */
         display: inline-flex;
         flex-direction: row;
-        align-items: baseline;
+        align-items: center;
+        justify-content: center;
         gap: 6px;
         padding: 8px 12px;
         border: 1px solid var(--divider-color, #e0e0e0);
@@ -8079,7 +8082,8 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
         margin: 0;
         padding: 4px 0;
         list-style: none;
-        min-width: max(180px, 100%);
+        width: max-content; /* size to widest item, not parent button */
+        min-width: 140px; /* small floor so the menu never gets skinny */
         max-width: 280px;
         background: var(--card-background-color, #fff);
         border: 1px solid var(--divider-color, #e0e0e0);
@@ -8115,6 +8119,9 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
 
       /* Mobile / narrow header: stack name and prefix vertically inside
          the button (multi-entry) and inside the wrap (single-entry).
+         The caret is pulled out of the flex column flow and pinned to
+         the right edge of the button so it doesn't end up as a third
+         row below the prefix. Extra right-padding leaves room for it.
          Two gates fire this: the panel's own [narrow] attribute (set by
          HA's responsive sidebar via the reflected 'narrow' property)
          and a viewport media query as a fallback for desktop browsers
@@ -8125,7 +8132,20 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
       :host([narrow]) .device-switcher {
         flex-direction: column;
         align-items: flex-end;
+        justify-content: center;
         gap: 0;
+      }
+
+      :host([narrow]) .device-switcher {
+        padding-right: 28px; /* room for the absolutely-positioned caret */
+      }
+
+      :host([narrow]) .device-switcher-caret {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        margin-left: 0;
       }
 
       :host([narrow]) .device-prefix {
@@ -8137,7 +8157,18 @@ function e(e,t,i,o){var r,a=arguments.length,s=a<3?t:null===o?o=Object.getOwnPro
         .device-switcher {
           flex-direction: column;
           align-items: flex-end;
+          justify-content: center;
           gap: 0;
+        }
+        .device-switcher {
+          padding-right: 28px;
+        }
+        .device-switcher-caret {
+          position: absolute;
+          right: 10px;
+          top: 50%;
+          transform: translateY(-50%);
+          margin-left: 0;
         }
         .device-prefix {
           line-height: 1.1;
