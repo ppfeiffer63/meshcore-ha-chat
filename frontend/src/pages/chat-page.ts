@@ -953,9 +953,14 @@ export class ChatPage extends LitElement {
         this._pendingScroll = 'bottom';
       }
 
-      // Send via service
+      // Send via service.
+      // Phase 4.5 (forensics Fix 5): thread the selected entry's id
+      // through so upstream `meshcore.send_*` routes to the right
+      // coordinator. Without entry_id, the upstream service sends from
+      // whichever coordinator is iterated first in `hass.data[meshcore]`.
+      const entryId = this.config?.entry_id;
       if (this._isContact()) {
-        await sendDirectMessage(this.hass, this.selectedId, text);
+        await sendDirectMessage(this.hass, this.selectedId, text, entryId);
       } else {
         const idx = parseInt(this.selectedId, 10);
         if (isNaN(idx) || idx < 0 || idx > 255) {
@@ -963,7 +968,7 @@ export class ChatPage extends LitElement {
           this._inputText = text;
           return;
         }
-        await sendChannelMessage(this.hass, idx, text);
+        await sendChannelMessage(this.hass, idx, text, entryId);
       }
     } catch (err) {
       console.error('Failed to send message:', err);
