@@ -470,6 +470,22 @@ export class ChatPage extends LitElement {
     }
     if (changedProperties.has('config') && this.config && this._messageStore) {
       this._messageStore.setConfig(this.config);
+      // Phase 4.6: when the panel-header entry switch lands a new
+      // config here (entry_id changed), re-resolve _currentEntityId
+      // by re-running _onConversationSelected() — otherwise selectedId
+      // stays the same and the chat view keeps displaying the previous
+      // entry's _ch_<idx>_messages (or _<pubkey6>_messages for DMs).
+      // Only fire when entry_id specifically changed; avoids spurious
+      // re-fetches when other config props tick (e.g., node_name
+      // updates after identity rename).
+      const previousConfig = changedProperties.get('config') as PanelConfig | undefined;
+      if (
+        this.selectedId
+        && previousConfig
+        && previousConfig.entry_id !== this.config.entry_id
+      ) {
+        this._onConversationSelected();
+      }
     }
     if (changedProperties.has('selectedId')) {
       this._onConversationSelected();
