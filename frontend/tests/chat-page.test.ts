@@ -132,6 +132,9 @@ interface PrivateChatPage {
   _currentEntityId: string | null;
   _markReadGraceUntil: number;
   _postSwitchMarkReadTimer: ReturnType<typeof setTimeout> | null;
+  /** F02 fix — gate field; tests set this to true to simulate user
+      engagement when exercising the deferred-mark-read path. */
+  _userHasScrolledSinceSwitch: boolean;
   _onChatScroll(e: Event): void;
   _checkAndMarkReadIfAtBottom(): void;
   _isLastMessageVisible(): boolean;

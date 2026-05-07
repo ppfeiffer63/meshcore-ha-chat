@@ -703,8 +703,18 @@ export class MessageStore {
           }
         }
       }
-      // Trigger store fetch to replace optimistic with stored version
-      if (this._entityId) this._debouncedFetch(this._entityId);
+      // Trigger store fetch to replace optimistic with stored version.
+      // F04 fix: when the buffer holds an anchor-driven mid-conversation
+      // window (`_hasNewerMessages === true`), `_fetchMessages`'s
+      // newest-50 reload would evict the user's loaded older messages
+      // and visibly shift their viewport. Mirror `_pollFetch`'s
+      // symmetric gate at line 887. The optimistic message is already
+      // visible; reconciliation to the stored version happens
+      // naturally when the user reaches that part of the buffer via
+      // `loadNewerMessages` (cursor-based, no buffer rebuild).
+      if (this._entityId && !this._hasNewerMessages) {
+        this._debouncedFetch(this._entityId);
+      }
       return;
     }
 
@@ -766,8 +776,15 @@ export class MessageStore {
       }
     }
 
-    // Trigger debounced store fetch to get the authoritative stored version
-    if (this._entityId) {
+    // Trigger debounced store fetch to get the authoritative stored
+    // version. F04 fix: see the matching gate in the outgoing branch
+    // above; same rationale — when the buffer is mid-conversation
+    // (`_hasNewerMessages === true`), `_fetchMessages`'s newest-50
+    // reload evicts the loaded window and shifts the viewport. The
+    // rt_ message inserted just above is already visible; cursor-
+    // based `loadNewerMessages` will reconcile it to the stored
+    // version when the user scrolls past the anchor window.
+    if (this._entityId && !this._hasNewerMessages) {
       this._debouncedFetch(this._entityId);
     }
   }
