@@ -853,8 +853,27 @@ export class ChatPage extends LitElement {
     if (!store) return html``;
     const counter = store.newMessagesWhileAway;
     const hasNewer = store.hasNewerMessages;
-    if (counter === 0 && !hasNewer) return html``;
-    const label = counter > 0 ? `↓ ${counter} new` : `↓ new`;
+    // F03 fix: show the pill whenever any of three conditions hold:
+    //   - realtime arrival accumulated while user was away from bottom
+    //     (`counter > 0`),
+    //   - unloaded newer messages exist on disk past the buffer tail
+    //     (`hasNewer`),
+    //   - the unread divider is rendered AND below the viewport bottom
+    //     (`hasUnreadBelow`) — covers the low-unread anchor-open case
+    //     where the after-window covers all unread but the user hasn't
+    //     scrolled to them yet.
+    const hasUnreadBelow = this._isUnreadDividerBelowViewport();
+    if (counter === 0 && !hasNewer && !hasUnreadBelow) return html``;
+    // Label preference: counter (most precise) > "↓ new" (when only
+    // hasNewer) > "↓ unread" (when only hasUnreadBelow).
+    let label: string;
+    if (counter > 0) {
+      label = `↓ ${counter} new`;
+    } else if (hasNewer) {
+      label = `↓ new`;
+    } else {
+      label = `↓ unread`;
+    }
     return html`
       <button class="new-messages-indicator" @click=${this._jumpToBottom}>
         ${label}
@@ -1285,6 +1304,33 @@ export class ChatPage extends LitElement {
     const containerBottom = container.getBoundingClientRect().bottom;
     const lastBottom = last.getBoundingClientRect().bottom;
     return lastBottom <= containerBottom + 5;
+  }
+
+  /**
+   * F03 fix: the pill should show whenever there are unread messages
+   * the user hasn't scrolled past, not just when the buffer tail isn't
+   * the conversation's newest. For low-unread conversations the
+   * anchor-open after-window covers all unread (`hasNewerMessages`
+   * stays false), but the user still benefits from a visible "jump to
+   * unread" affordance. This helper checks whether the unread divider
+   * is rendered AND below the viewport bottom — i.e., there's unread
+   * content the user hasn't reached yet.
+   *
+   * Returns false when the divider element doesn't exist (no unread
+   * for this conversation, or anchor not in buffer), or when the
+   * divider is at or above the viewport bottom (user has scrolled to
+   * or past it).
+   */
+  private _isUnreadDividerBelowViewport(): boolean {
+    const container = this._getChatContainer();
+    if (!container) return false;
+    const divider = container.querySelector('.unread-divider') as HTMLElement | null;
+    if (!divider) return false;
+    const containerBottom = container.getBoundingClientRect().bottom;
+    const dividerTop = divider.getBoundingClientRect().top;
+    // 5 px slack absorbs sub-pixel rounding from getBoundingClientRect
+    // (mirrors `_isLastMessageVisible`'s +5 slack).
+    return dividerTop >= containerBottom - 5;
   }
 
   /**
