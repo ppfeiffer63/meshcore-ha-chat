@@ -345,6 +345,11 @@ describe('Phase 4 — mark-read 1000ms grace period after switch', () => {
     priv(page)._checkAndMarkReadIfAtBottom();
     expect(markConversationRead).not.toHaveBeenCalled();
 
+    // F02 fix: simulate the user having scrolled since the switch so
+    // the new user-engagement gate doesn't suppress the call. The
+    // grace-period gate is what's under test here.
+    priv(page)._userHasScrolledSinceSwitch = true;
+
     // Past the grace window: same call DOES fire mark-read.
     priv(page)._markReadGraceUntil = 0;
     priv(page)._checkAndMarkReadIfAtBottom();
@@ -379,6 +384,13 @@ describe('Bug #1 — deferred mark-read after grace period elapses', () => {
       expect(priv(page)._postSwitchMarkReadTimer).not.toBeNull();
       expect(markConversationRead).not.toHaveBeenCalled();
 
+      // F02 fix: simulate the user having scrolled during the grace
+      // window so the new user-engagement gate in
+      // `_checkAndMarkReadIfAtBottom` doesn't suppress the deferred
+      // call. The deferred-timer mechanics (one-shot fire after
+      // grace) is what's under test here.
+      priv(page)._userHasScrolledSinceSwitch = true;
+
       // Advance fake timers past the grace period. The timer's
       // callback runs, _checkAndMarkReadIfAtBottom is called, all
       // gates pass, mark-read fires.
@@ -410,6 +422,14 @@ describe('Bug #1 — deferred mark-read after grace period elapses', () => {
       await page.updateComplete;
       const secondTimer = priv(page)._postSwitchMarkReadTimer;
       expect(secondTimer).not.toBe(firstTimer);
+
+      // F02 fix: simulate the user having scrolled inside the second
+      // (entity '1') conversation so the user-engagement gate
+      // doesn't suppress the deferred mark-read. Reset by the
+      // selectedId='1' switch above; set here for the post-grace
+      // call. Timer-cancellation mechanics (only ONE mark-read for
+      // entity '1', not two) is what's under test.
+      priv(page)._userHasScrolledSinceSwitch = true;
 
       // Elapse the grace period. Only ONE mark-read fires (for
       // entity '1'), not two — the entity '0' timer was cancelled.
