@@ -704,15 +704,38 @@ export class MessageStore {
         }
       }
       // Trigger store fetch to replace optimistic with stored version.
-      // F04 fix: when the buffer holds an anchor-driven mid-conversation
-      // window (`_hasNewerMessages === true`), `_fetchMessages`'s
-      // newest-50 reload would evict the user's loaded older messages
-      // and visibly shift their viewport. Mirror `_pollFetch`'s
-      // symmetric gate at line 887. The optimistic message is already
-      // visible; reconciliation to the stored version happens
-      // naturally when the user reaches that part of the buffer via
-      // `loadNewerMessages` (cursor-based, no buffer rebuild).
-      if (this._entityId && !this._hasNewerMessages) {
+      // F04 fix (corrected 2026-05-07 post-deploy): only fire the
+      // newest-50 rebuild when the buffer truly represents the full
+      // conversation tail with no unloaded older messages — the only
+      // case where `_fetchMessages`'s no-cursor newest-50 fetch is
+      // idempotent against the buffer. Earlier draft of F04 only
+      // gated on `!_hasNewerMessages` (mirroring `_pollFetch`'s gate
+      // at line 887), but `_pollFetch` uses an `after`-cursor that
+      // can't evict older content; `_fetchMessages` can. Empirical
+      // repro: anchor-driven reopen of a caught-up conversation
+      // (cursor at newest, after-window empty → `_hasNewerMessages =
+      // false`, `_hasOlderMessages = true`); user sends a message,
+      // outgoing branch fires `_debouncedFetch`, newest-50 returns
+      // 50 messages while buffer had 26 → 24 older bubbles prepended
+      // → viewport "jumps up" ~20 messages. Adding the
+      // `!_hasOlderMessages` clause closes the prepend-eviction
+      // case symmetrically with the append-eviction case.
+      //
+      // Optimistic-to-stored reconciliation remains safe: the
+      // outgoing in-place loop above already updates the
+      // `optimistic_*` entry with the event payload's rxLogData
+      // etc.; the debounced fetch was a backup hygiene step, not a
+      // content-correctness requirement. When the user later scrolls
+      // past the optimistic via `loadNewerMessages` (cursor-based),
+      // the stored version is loaded and dedupe at lines 372-377
+      // filters the optimistic entry. switchEntity clears the buffer
+      // entirely on conversation change, bounding the optimistic_
+      // lifetime.
+      if (
+        this._entityId &&
+        !this._hasNewerMessages &&
+        !this._hasOlderMessages
+      ) {
         this._debouncedFetch(this._entityId);
       }
       return;
@@ -777,14 +800,18 @@ export class MessageStore {
     }
 
     // Trigger debounced store fetch to get the authoritative stored
-    // version. F04 fix: see the matching gate in the outgoing branch
-    // above; same rationale — when the buffer is mid-conversation
-    // (`_hasNewerMessages === true`), `_fetchMessages`'s newest-50
-    // reload evicts the loaded window and shifts the viewport. The
-    // rt_ message inserted just above is already visible; cursor-
-    // based `loadNewerMessages` will reconcile it to the stored
-    // version when the user scrolls past the anchor window.
-    if (this._entityId && !this._hasNewerMessages) {
+    // version. F04 fix (corrected 2026-05-07 post-deploy): see the
+    // matching gate in the outgoing branch above; same rationale.
+    // The `!_hasOlderMessages` clause is required because
+    // `_fetchMessages` (no-cursor newest-50) can prepend older
+    // bubbles to the buffer when the anchor-buffer is shorter than
+    // 50, shifting the user's viewport upward — symmetric eviction
+    // case to the original F04 append-eviction.
+    if (
+      this._entityId &&
+      !this._hasNewerMessages &&
+      !this._hasOlderMessages
+    ) {
       this._debouncedFetch(this._entityId);
     }
   }
