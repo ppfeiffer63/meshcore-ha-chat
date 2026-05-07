@@ -564,7 +564,14 @@ export class MeshCorePanel extends LitElement {
   private _selectDevice(entryId: string) {
     if (entryId !== this._selectedEntryId) {
       this._selectedEntryId = entryId;
-      this._loadDeviceData();
+      // F01 fix: the backend filters unread counts by entry_id (Phase 4
+      // ws_get_unread_counts), so stale counts from the previously-
+      // selected entry remain in `_unreadCounts` until the next
+      // `meshcore_unread_updated` bus event fires — could be minutes on
+      // a quiet mesh. Run the unread refresh in parallel with the
+      // contacts/channels refresh; both are independent backend round-
+      // trips against the new entry.
+      Promise.all([this._loadDeviceData(), this._loadUnreadCounts()]);
     }
     this._closeDeviceDropdown();
   }
