@@ -420,8 +420,13 @@ export class ChatPage extends LitElement {
     .new-messages-indicator {
       position: sticky;
       bottom: 12px;
-      align-self: center;
-      margin: 0 auto;
+      /* F05 fix: 'align-self: center' requires a flex parent (chat-
+         container is 'display: block'); 'margin: 0 auto' requires a
+         block-level element with finite width (button defaults to
+         'inline-block'). Both were no-ops. Using left + transform
+         works with sticky positioning regardless of parent layout. */
+      left: 50%;
+      transform: translateX(-50%);
       padding: 6px 14px;
       border: none;
       border-radius: 16px;
@@ -440,7 +445,10 @@ export class ChatPage extends LitElement {
     }
 
     .new-messages-indicator:active {
-      transform: translateY(1px);
+      /* F05 fix: combine the centering transform with the press
+         offset. A single 'transform' declaration replaces any prior
+         one, so ':active' must restate both. */
+      transform: translateX(-50%) translateY(1px);
     }
   `;
 
