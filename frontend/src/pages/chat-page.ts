@@ -83,6 +83,24 @@ export class ChatPage extends LitElement {
    */
   private _postSwitchMarkReadTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * F02 fix: gate the deferred-mark-read timer on whether the user has
+   * actually engaged with the chat container since the last conversation
+   * switch. For short or low-unread conversations where the entire
+   * unread tail fits in the viewport, `_isLastMessageVisible()` returns
+   * true immediately on open — without this gate, the deferred timer
+   * fires mark-read before the user has scrolled past the divider,
+   * advancing the cursor and erasing the visual landmark on next open.
+   *
+   * Reset to false in `_onConversationSelected`. Set to true in
+   * `_onChatScroll` only when the scroll is human-originated (we
+   * detect this by checking that `_isScrollGuarded()` is false —
+   * programmatic scrolls happen during the guard window). Also set to
+   * true in `_jumpToBottom` (pill click), since that's an explicit
+   * user-engagement signal.
+   */
+  private _userHasScrolledSinceSwitch = false;
+
   static styles = css`
     :host {
       display: flex;
@@ -915,6 +933,13 @@ export class ChatPage extends LitElement {
       // MARK_READ_GRACE_PERIOD_MS. Subsequent mark-reads in this
       // conversation fire without delay.
       this._markReadGraceUntil = Date.now() + MARK_READ_GRACE_PERIOD_MS;
+      // F02 fix: reset the user-engagement gate on every conversation
+      // switch. The deferred mark-read timer scheduled below will only
+      // fire if the user actually scrolls (or clicks the pill) inside
+      // this conversation — see `_checkAndMarkReadIfAtBottom` for the
+      // gate site and `_onChatScroll` / `_jumpToBottom` for the set
+      // sites.
+      this._userHasScrolledSinceSwitch = false;
 
       // Phase 4 fix (Bug #1): the divider's scroll-into-view fires its
       // scroll event INSIDE the grace window — the synchronous
@@ -1177,6 +1202,17 @@ export class ChatPage extends LitElement {
       container.scrollHeight - container.scrollTop - container.clientHeight;
     const atBottom = distFromBottom < AT_BOTTOM_THRESHOLD_PX;
 
+    // F02 fix: distinguish human-originated scrolls from programmatic
+    // ones (anchor scroll, jump-to-bottom). Programmatic scrolls happen
+    // inside the guard window set by `_executeScroll('last-read')`;
+    // anything outside the guard is the user. The flag is consumed in
+    // `_checkAndMarkReadIfAtBottom` to gate the deferred mark-read
+    // timer for short/low-unread conversations where the divider and
+    // newest bubble are both visible at open.
+    if (!this._isScrollGuarded()) {
+      this._userHasScrolledSinceSwitch = true;
+    }
+
     // (iii) prerequisite — keep the store's at-bottom flag synchronized
     // with the viewport on every event. The store's R5c logic (counter
     // reset on transition to at-bottom while caught up) and the
@@ -1283,6 +1319,15 @@ export class ChatPage extends LitElement {
     // inside the helper.
     if (this._messageStore?.hasNewerMessages) return;
     if (!this._isLastMessageVisible()) return;
+    // F02 fix: for low-unread / short conversations the anchor-open
+    // scroll lands the user with both the divider and the newest
+    // message visible simultaneously. Without a user-engagement gate,
+    // the deferred mark-read timer fires before the user has actively
+    // read past the divider — advancing the cursor and erasing the
+    // visual landmark on next open. The flag is set in `_onChatScroll`
+    // (any human scroll outside the scroll guard) and in
+    // `_jumpToBottom` (explicit pill click).
+    if (!this._userHasScrolledSinceSwitch) return;
     this._markActiveRead(this._currentEntityId);
     this._messageStore?.resetNewMessagesCounter();
   }
@@ -1310,6 +1355,13 @@ export class ChatPage extends LitElement {
       const container = this._getChatContainer();
       if (!container) return;
       container.scrollTop = container.scrollHeight;
+      // F02 fix: pill click is explicit user engagement. The deferred
+      // mark-read also fires from this path's `_checkAndMarkReadIfAtBottom`
+      // call; without setting the flag, the gate added in
+      // `_checkAndMarkReadIfAtBottom` would suppress this legitimate
+      // mark-read (the user is at the tail because they explicitly
+      // jumped there).
+      this._userHasScrolledSinceSwitch = true;
       // Bypass the R1 grace period — the user explicitly clicked the
       // indicator to jump to current, so they're definitionally at the
       // tail and want the mark-read to fire immediately.
