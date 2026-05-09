@@ -6,9 +6,9 @@ A sidebar chat panel and persistent message store for the [MeshCore](https://mes
 
 Works as a **companion** to the [core meshcore integration](https://github.com/meshcore-dev/meshcore-ha) — install both. This integration does not drive the radio itself; it adds a chat UI, message persistence, and search on top of the events and services exposed by the core integration.
 
-> **Status:** v0.1 in active development.
+> **Status:** v0.2 in active development.
 
-## Features (v0.1)
+## Features (v0.2)
 
 - Sidebar chat panel with channels, DMs, and contact list
 - Persistent message history (survives Home Assistant restarts)
