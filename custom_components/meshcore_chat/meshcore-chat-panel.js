@@ -3435,12 +3435,15 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       margin-top: 2px;
       font-size: 10px;
     }
-  `,e([ue({type:Array})],rt.prototype,"segments",void 0),e([ue({type:Number})],rt.prototype,"total",void 0),e([ue({type:String})],rt.prototype,"legend",void 0),e([ue({type:String})],rt.prototype,"extraLegendText",void 0),rt=e([pe("meshcore-stacked-bar")],rt);let st=class extends ce{constructor(){super(...arguments),this.content="",this.glyph="ⓘ"}render(){return this.content?j`
+  `,e([ue({type:Array})],rt.prototype,"segments",void 0),e([ue({type:Number})],rt.prototype,"total",void 0),e([ue({type:String})],rt.prototype,"legend",void 0),e([ue({type:String})],rt.prototype,"extraLegendText",void 0),rt=e([pe("meshcore-stacked-bar")],rt);let st=class extends ce{constructor(){super(...arguments),this.content=""}render(){return this.content?j`
       <button class="info-tip"
               type="button"
               aria-label="More information"
               @click=${this._stopPropagation}>
-        ${this.glyph}
+        <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle cx="7" cy="4" r="1.2" fill="currentColor"></circle>
+          <rect x="6.1" y="6.2" width="1.8" height="5.2" rx="0.6" fill="currentColor"></rect>
+        </svg>
         <span class="info-tip-content" role="tooltip">
           ${this.content}
           ${this.source?j`<span class="src">${this.source}</span>`:W}
@@ -3460,11 +3463,6 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       height: 14px;
       margin-left: 4px;
       border-radius: 50%;
-      font-size: 10px;
-      font-weight: 600;
-      font-style: normal;
-      text-transform: none;
-      letter-spacing: 0;
       color: var(--secondary-text-color);
       background: var(--divider-color, #e0e0e0);
       cursor: help;
@@ -3472,7 +3470,17 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       flex-shrink: 0;
       border: none;
       padding: 0;
-      font-family: inherit;
+    }
+    /* The "i" glyph is drawn as inline SVG (not a Unicode character) so
+       its dot + stem sit on the geometric center of the 14×14 button
+       regardless of font metrics. Using a Unicode glyph here previously
+       produced two stacked, optically-misaligned rings — the CSS-drawn
+       button background plus the glyph's own circled-i ring. */
+    button.info-tip svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
     }
     button.info-tip:hover,
     button.info-tip:focus {
@@ -3514,7 +3522,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       color: var(--secondary-text-color);
       word-break: break-all;
     }
-  `,e([ue({type:String})],st.prototype,"content",void 0),e([ue({type:String})],st.prototype,"source",void 0),e([ue({type:String})],st.prototype,"glyph",void 0),st=e([pe("meshcore-info-tip")],st);let at=class extends ce{constructor(){super(...arguments),this.entities=[],this.hiddenCount=0}render(){if(!this.hass||!this.device)return W;const e=new Set,t=this._renderHeroTiles(e),i=this._buildGroups(e);return j`
+  `,e([ue({type:String})],st.prototype,"content",void 0),e([ue({type:String})],st.prototype,"source",void 0),st=e([pe("meshcore-info-tip")],st);let at=class extends ce{constructor(){super(...arguments),this.entities=[],this.hiddenCount=0}render(){if(!this.hass||!this.device)return W;const e=new Set,t=this._renderHeroTiles(e),i=this._buildGroups(e);return j`
       <div class="hero-row">
         ${t}
       </div>

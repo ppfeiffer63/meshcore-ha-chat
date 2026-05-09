@@ -26,8 +26,6 @@ export class InfoTip extends LitElement {
   @property({ type: String }) content = '';
   /** Optional citation URL. When omitted, no source line renders. */
   @property({ type: String }) source?: string;
-  /** Override the default ⓘ glyph if a different one fits the surrounding type. */
-  @property({ type: String }) glyph = 'ⓘ';
 
   static styles = css`
     :host {
@@ -43,11 +41,6 @@ export class InfoTip extends LitElement {
       height: 14px;
       margin-left: 4px;
       border-radius: 50%;
-      font-size: 10px;
-      font-weight: 600;
-      font-style: normal;
-      text-transform: none;
-      letter-spacing: 0;
       color: var(--secondary-text-color);
       background: var(--divider-color, #e0e0e0);
       cursor: help;
@@ -55,7 +48,17 @@ export class InfoTip extends LitElement {
       flex-shrink: 0;
       border: none;
       padding: 0;
-      font-family: inherit;
+    }
+    /* The "i" glyph is drawn as inline SVG (not a Unicode character) so
+       its dot + stem sit on the geometric center of the 14×14 button
+       regardless of font metrics. Using a Unicode glyph here previously
+       produced two stacked, optically-misaligned rings — the CSS-drawn
+       button background plus the glyph's own circled-i ring. */
+    button.info-tip svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
     }
     button.info-tip:hover,
     button.info-tip:focus {
@@ -106,7 +109,10 @@ export class InfoTip extends LitElement {
               type="button"
               aria-label="More information"
               @click=${this._stopPropagation}>
-        ${this.glyph}
+        <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle cx="7" cy="4" r="1.2" fill="currentColor"></circle>
+          <rect x="6.1" y="6.2" width="1.8" height="5.2" rx="0.6" fill="currentColor"></rect>
+        </svg>
         <span class="info-tip-content" role="tooltip">
           ${this.content}
           ${this.source
