@@ -147,6 +147,8 @@ interface PrivateChatPage {
   _checkAndMarkReadIfAtBottom(): void;
   _isLastMessageVisible(): boolean;
   _jumpToBottom(): Promise<void>;
+  _unreadCountAtSelection: number;
+  _renderItemsWithDivider(renderItems: Array<unknown>): unknown[];
 }
 function priv(page: ChatPage): PrivateChatPage {
   return page as unknown as PrivateChatPage;
@@ -996,5 +998,117 @@ describe('Phase 4 — indicator visibility', () => {
       page.shadowRoot?.querySelector('.new-messages-indicator')?.textContent ?? '';
     expect(text).toContain('unread');
     expect(text).not.toContain('latest');
+  });
+});
+
+// ─── Phase 1 — divider projection: "outgoing never counts" ───────────────
+//
+// Regression coverage for the reported bug (docs/Proposed - Unify Unread
+// State (Frontend).md, Change 1.1): sending a message into a fully-read
+// conversation made the "New messages" divider render above the user's
+// own just-sent message. The fix walks the render groups at/after the
+// divider position and suppresses the divider unless there is an INBOUND
+// group there — mirroring the backend's count_unread_after, which counts
+// only `not outgoing`.
+describe('Phase 1 — divider projection ("outgoing never counts")', () => {
+  function makeMsg(id: string, isOutgoing: boolean): ChatMessage {
+    const sender = isOutgoing ? 'TestNode' : 'someone';
+    return {
+      id,
+      sender,
+      text: `msg ${id}`,
+      timestamp: new Date('2026-05-14T12:00:00Z'),
+      isOutgoing,
+      isSystem: false,
+      raw: `${sender}: msg ${id}`,
+      mentions: [],
+    };
+  }
+
+  // A render item for a single-sender message group. `groupMessages`
+  // guarantees a group is single-sender, so `isOutgoing` is uniform —
+  // matching the real render-item shape (`{ type: 'group', group }`).
+  function groupItem(id: string, isOutgoing: boolean) {
+    const messages = [makeMsg(id, isOutgoing)];
+    return {
+      type: 'group',
+      group: {
+        sender: messages[0].sender,
+        isOutgoing,
+        isSystem: false,
+        messages,
+        startTime: messages[0].timestamp,
+        endTime: messages[0].timestamp,
+      },
+    };
+  }
+
+  // The divider is emitted as html`<div class="unread-divider">…`; its
+  // static strings carry the class name. Scan the returned template
+  // results for it — no DOM render needed (keeps the test off
+  // <meshcore-message-bubble>'s render path).
+  function dividerIndex(results: unknown[]): number {
+    return results.findIndex(
+      (r) =>
+        !!r &&
+        Array.isArray((r as { strings?: unknown }).strings) &&
+        (r as { strings: string[] }).strings.some((s) => s.includes('unread-divider')),
+    );
+  }
+
+  async function renderWithAnchor(
+    renderItems: Array<unknown>,
+    anchorId: string,
+  ): Promise<unknown[]> {
+    const page = await mountChatPage({ conversations: [makeChannel(0)] });
+    priv(page)._anchorIdAtSelection = anchorId;
+    priv(page)._unreadCountAtSelection = 0;
+    return priv(page)._renderItemsWithDivider(renderItems);
+  }
+
+  it('anchor is the last group → no divider (nothing on the unread side)', async () => {
+    // [inbound, anchor] — anchor is the last group; nothing after it.
+    const results = await renderWithAnchor(
+      [groupItem('m1', false), groupItem('anchor', false)],
+      'anchor',
+    );
+    expect(dividerIndex(results)).toBe(-1);
+  });
+
+  it('only an outgoing group after the anchor → no divider (the reported bug)', async () => {
+    // [anchor, outgoing] — user sent a message into a fully-read
+    // conversation. Pre-fix this rendered the divider above the
+    // just-sent message.
+    const results = await renderWithAnchor(
+      [groupItem('anchor', false), groupItem('sent', true)],
+      'anchor',
+    );
+    expect(dividerIndex(results)).toBe(-1);
+  });
+
+  it('an inbound group after the anchor → divider renders above it', async () => {
+    // [anchor, inbound] — genuine unread inbound message.
+    const results = await renderWithAnchor(
+      [groupItem('anchor', false), groupItem('inbound', false)],
+      'anchor',
+    );
+    // results: [anchorBubble, divider, inboundBubble]
+    expect(dividerIndex(results)).toBe(1);
+  });
+
+  it('inbound then outgoing after the anchor → divider renders above the inbound group', async () => {
+    // [anchor, inbound, outgoing] — unread inbound exists and the user
+    // replied. The trailing outgoing group must not suppress the
+    // divider; it stays above the inbound group.
+    const results = await renderWithAnchor(
+      [
+        groupItem('anchor', false),
+        groupItem('inbound', false),
+        groupItem('reply', true),
+      ],
+      'anchor',
+    );
+    // results: [anchorBubble, divider, inboundBubble, replyBubble]
+    expect(dividerIndex(results)).toBe(1);
   });
 });

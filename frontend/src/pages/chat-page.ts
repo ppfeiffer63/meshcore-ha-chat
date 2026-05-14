@@ -890,11 +890,25 @@ export class ChatPage extends LitElement {
       dividerAtMessageIdx = idx >= 0 ? idx : 0;
     }
 
-    // If the anchor is the very last group (no unread after it), don't
-    // render a divider at all — there's nothing on the unread side.
+    // Don't render a divider unless there is an INBOUND message group at
+    // or after the divider position. Outgoing messages are never
+    // "unread" — mirrors the backend's count_unread_after, which counts
+    // only `not outgoing` (message_store.py:432). This subsumes the old
+    // ">= totalMessageItems" check (anchor-is-last-group) and also fixes
+    // the case where the only group(s) after the anchor are the user's
+    // own just-sent message(s).
     if (placeAfterAnchor && dividerAtMessageIdx !== null) {
-      const totalMessageItems = renderItems.filter(item => item.type !== 'date-separator').length;
-      if (dividerAtMessageIdx >= totalMessageItems) {
+      let groupIdx = 0;
+      let hasInboundAfterDivider = false;
+      for (const item of renderItems) {
+        if (item.type === 'date-separator') continue;
+        if (groupIdx >= dividerAtMessageIdx && !item.group?.isOutgoing) {
+          hasInboundAfterDivider = true;
+          break;
+        }
+        groupIdx++;
+      }
+      if (!hasInboundAfterDivider) {
         dividerAtMessageIdx = null;
       }
     }
