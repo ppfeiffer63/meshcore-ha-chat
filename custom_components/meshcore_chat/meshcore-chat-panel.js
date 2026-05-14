@@ -2880,7 +2880,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
           </svg>
         </button>
       </div>
-    `}_renderItemsWithDivider(e){const t=[];let i=0,o=!1,r=null,s=!1,a=null;if(this._anchorIdAtSelection){let t=0;for(const i of e){if("date-separator"===i.type)continue;const e=i.group?.messages;if(e?.some(e=>e.id===this._anchorIdAtSelection)){a=t;break}t++}}if(null!==a)r=a+1,s=!0;else if(this._unreadCountAtSelection>0){const t=e.filter(e=>"date-separator"!==e.type).length-this._unreadCountAtSelection;r=t>=0?t:0}s&&null!==r&&r>=e.filter(e=>"date-separator"!==e.type).length&&(r=null);for(const s of e)"date-separator"!==s.type?(o||null===r||i!==r||(t.push(j`
+    `}_renderItemsWithDivider(e){const t=[];let i=0,o=!1,r=null,s=!1,a=null;if(this._anchorIdAtSelection){let t=0;for(const i of e){if("date-separator"===i.type)continue;const e=i.group?.messages;if(e?.some(e=>e.id===this._anchorIdAtSelection)){a=t;break}t++}}if(null!==a)r=a+1,s=!0;else if(this._unreadCountAtSelection>0){const t=e.filter(e=>"date-separator"!==e.type).length-this._unreadCountAtSelection;r=t>=0?t:0}if(s&&null!==r){let t=0,i=!1;for(const o of e)if("date-separator"!==o.type){if(t>=r&&!o.group?.isOutgoing){i=!0;break}t++}i||(r=null)}for(const s of e)"date-separator"!==s.type?(o||null===r||i!==r||(t.push(j`
           <div class="unread-divider">
             <span>New messages</span>
           </div>
