@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UnreadController } from '../src/chat/unread-controller';
+import { MARK_READ_GRACE_PERIOD_MS } from '../src/constants';
+import type { RenderItem } from '../src/types';
 
 // ─── Reference implementations ───────────────────────────────────────────
 //
@@ -294,5 +296,606 @@ describe('UnreadController — mark-read-requested plumbing', () => {
   it('requestMarkRead is a safe no-op when no handler is registered', () => {
     const c = new UnreadController();
     expect(() => c.requestMarkRead('e1')).not.toThrow();
+  });
+});
+
+// ─── Phase 3: the read-progress machine ──────────────────────────────────
+//
+// These exercise the per-conversation read-progress machine that
+// Phase 3 moved out of chat-page: the anchor, the R1 grace window, the
+// deferred post-switch timer, the mark-read dedup guard, the
+// `markReadFired` lifecycle, the late-arriving re-anchor, and the
+// `dividerAfterGroupIdx` projection. Behavioral coverage is the
+// contract — each test asserts the same observable outcome as the
+// chat-page test it replaces (see the commit body's test-to-test
+// mapping). All Phase-3 blocks run under fake timers: `beginConversation`
+// arms a 1000 ms `setTimeout`, and a fake clock keeps the grace-window
+// assertions deterministic (vitest fakes `Date.now()` alongside
+// `setTimeout`).
+
+const E = 'binary_sensor.meshcore_aa1234_ch_1_messages';
+const E2 = 'binary_sensor.meshcore_bb5678_ch_1_messages';
+
+// Render-item fixtures. `groupMessages` (message-parser.ts) splits on
+// sender change, so a render group is single-sender and `isOutgoing`
+// is uniform — these fixtures mirror that invariant.
+function makeMsg(id: string, isOutgoing: boolean) {
+  return {
+    id,
+    sender: isOutgoing ? 'me' : 'someone',
+    text: `msg ${id}`,
+    timestamp: new Date('2026-05-14T12:00:00Z'),
+    isOutgoing,
+    isSystem: false,
+    raw: `msg ${id}`,
+    mentions: [],
+  };
+}
+function groupItem(id: string, isOutgoing: boolean): RenderItem {
+  const messages = [makeMsg(id, isOutgoing)];
+  return {
+    type: 'group',
+    group: {
+      sender: messages[0].sender,
+      isOutgoing,
+      isSystem: false,
+      messages,
+      startTime: messages[0].timestamp,
+      endTime: messages[0].timestamp,
+    },
+  } as RenderItem;
+}
+function dateSep(): RenderItem {
+  return {
+    type: 'date-separator',
+    date: new Date('2026-05-14T00:00:00Z'),
+    label: 'Today',
+  } as RenderItem;
+}
+
+// ─── beginConversation / endConversation ─────────────────────────────────
+
+describe('UnreadController — beginConversation / endConversation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('captures the anchor from the current lastRead map', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'msg-anchor' } }, null);
+    c.beginConversation(E, 0);
+    // The captured anchor is observable through the divider projection.
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('msg-anchor', false),
+        groupItem('inbound', false),
+      ]),
+    ).toBe(1);
+  });
+
+  it('captures a null anchor when lastRead has no entry for the entity', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: {} }, null);
+    c.beginConversation(E, 0);
+    expect(c.dividerAfterGroupIdx([groupItem('a', false)])).toBeNull();
+  });
+
+  it('does not emit a mark-read request on begin (opening must not advance the cursor)', () => {
+    const c = new UnreadController();
+    const handler = vi.fn();
+    c.onMarkReadRequested(handler);
+    c.beginConversation(E, 3);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('endConversation tears the read-progress down — dividerAfterGroupIdx returns null', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'msg-anchor' } }, null);
+    c.beginConversation(E, 0);
+    c.endConversation();
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('msg-anchor', false),
+        groupItem('inbound', false),
+      ]),
+    ).toBeNull();
+  });
+
+  it('a fresh controller (no conversation begun) has no divider and no-ops the mutators', () => {
+    const c = new UnreadController();
+    const handler = vi.fn();
+    c.onMarkReadRequested(handler);
+    expect(c.dividerAfterGroupIdx([groupItem('a', false)])).toBeNull();
+    expect(
+      c.onScrollState({
+        entityId: E,
+        lastMessageVisible: true,
+        hasNewerMessages: false,
+        bufferTailId: 't',
+      }),
+    ).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('beginConversation resets markReadFired for the new conversation', () => {
+    const c = new UnreadController();
+    c.onMarkReadRequested(vi.fn());
+    c.beginConversation(E, 0);
+    // Fire mark-read in conversation 1 (pill path bypasses grace).
+    expect(c.onPillJump({ entityId: E, bufferTailId: 'tail-1' })).toBe(true);
+    // Switch to conversation 2 — markReadFired is reset, so a
+    // late-arriving cursor for E2 is allowed to re-anchor.
+    c.ingestBackendData({ unread: {}, last_read: {} }, null);
+    c.beginConversation(E2, 0);
+    c.ingestBackendData({ unread: {}, last_read: { [E2]: 'late' } }, null);
+    expect(c.maybeReanchorOnLateData(E2)).toBe(true);
+  });
+});
+
+// ─── onScrollState — mark-read gates ─────────────────────────────────────
+
+describe('UnreadController — onScrollState mark-read gates', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setup() {
+    const c = new UnreadController();
+    const handler = vi.fn();
+    c.onMarkReadRequested(handler);
+    c.ingestBackendData({ unread: {}, last_read: {} }, null);
+    c.beginConversation(E, 0);
+    return { c, handler };
+  }
+
+  it('suppresses the first auto-mark-read inside the R1 grace window', () => {
+    const { c, handler } = setup();
+    const fired = c.onScrollState({
+      entityId: E,
+      lastMessageVisible: true,
+      hasNewerMessages: false,
+      bufferTailId: 'tail-1',
+    });
+    expect(fired).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('admits the mark-read once the grace window has elapsed', () => {
+    const { c, handler } = setup();
+    // Past the grace window. (The deferred post-switch timer also
+    // fires here, into a null `_postSwitchTimerHandler` — a harmless
+    // no-op since this suite does not register one.)
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    const fired = c.onScrollState({
+      entityId: E,
+      lastMessageVisible: true,
+      hasNewerMessages: false,
+      bufferTailId: 'tail-1',
+    });
+    expect(fired).toBe(true);
+    expect(handler).toHaveBeenCalledWith(E);
+  });
+
+  it('suppresses when hasNewerMessages is true (buffer tail is not the conversation tail)', () => {
+    const { c, handler } = setup();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    const fired = c.onScrollState({
+      entityId: E,
+      lastMessageVisible: true,
+      hasNewerMessages: true,
+      bufferTailId: 'tail-1',
+    });
+    expect(fired).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('suppresses when the last message is not visible (Bug #2 geometric gate)', () => {
+    const { c, handler } = setup();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    const fired = c.onScrollState({
+      entityId: E,
+      lastMessageVisible: false,
+      hasNewerMessages: false,
+      bufferTailId: 'tail-1',
+    });
+    expect(fired).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the entityId does not match the active conversation', () => {
+    const { c, handler } = setup();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    const fired = c.onScrollState({
+      entityId: E2,
+      lastMessageVisible: true,
+      hasNewerMessages: false,
+      bufferTailId: 'tail-1',
+    });
+    expect(fired).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when entityId is null', () => {
+    const { c, handler } = setup();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    expect(
+      c.onScrollState({
+        entityId: null,
+        lastMessageVisible: true,
+        hasNewerMessages: false,
+        bufferTailId: 'tail-1',
+      }),
+    ).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('dedups against the buffer tail — a repeated tail id does not re-fire', () => {
+    const { c, handler } = setup();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    const s = {
+      entityId: E,
+      lastMessageVisible: true,
+      hasNewerMessages: false,
+      bufferTailId: 'tail-1',
+    };
+    expect(c.onScrollState(s)).toBe(true);
+    expect(c.onScrollState(s)).toBe(false);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('a changed buffer tail re-arms the dedup gate', () => {
+    const { c, handler } = setup();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    expect(
+      c.onScrollState({
+        entityId: E,
+        lastMessageVisible: true,
+        hasNewerMessages: false,
+        bufferTailId: 'tail-1',
+      }),
+    ).toBe(true);
+    expect(
+      c.onScrollState({
+        entityId: E,
+        lastMessageVisible: true,
+        hasNewerMessages: false,
+        bufferTailId: 'tail-2',
+      }),
+    ).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('a null buffer tail is never treated as a dedup hit', () => {
+    const { c, handler } = setup();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    const s = {
+      entityId: E,
+      lastMessageVisible: true,
+      hasNewerMessages: false,
+      bufferTailId: null,
+    };
+    expect(c.onScrollState(s)).toBe(true);
+    expect(c.onScrollState(s)).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── onPillJump ──────────────────────────────────────────────────────────
+
+describe('UnreadController — onPillJump', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fires immediately, bypassing the R1 grace window', () => {
+    const c = new UnreadController();
+    const handler = vi.fn();
+    c.onMarkReadRequested(handler);
+    c.beginConversation(E, 0);
+    // Still inside the grace window — `onScrollState` would suppress;
+    // `onPillJump` (an explicit user "jump to current") must not.
+    const fired = c.onPillJump({ entityId: E, bufferTailId: 'tail-1' });
+    expect(fired).toBe(true);
+    expect(handler).toHaveBeenCalledWith(E);
+  });
+
+  it('still dedups against the buffer tail', () => {
+    const c = new UnreadController();
+    const handler = vi.fn();
+    c.onMarkReadRequested(handler);
+    c.beginConversation(E, 0);
+    expect(c.onPillJump({ entityId: E, bufferTailId: 'tail-1' })).toBe(true);
+    expect(c.onPillJump({ entityId: E, bufferTailId: 'tail-1' })).toBe(false);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('no-ops when entityId is null or does not match the active conversation', () => {
+    const c = new UnreadController();
+    const handler = vi.fn();
+    c.onMarkReadRequested(handler);
+    c.beginConversation(E, 0);
+    expect(c.onPillJump({ entityId: null, bufferTailId: 'tail-1' })).toBe(false);
+    expect(c.onPillJump({ entityId: E2, bufferTailId: 'tail-1' })).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+// ─── deferred post-switch timer ──────────────────────────────────────────
+
+describe('UnreadController — deferred post-switch timer', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('invokes the registered handler once the grace window elapses', () => {
+    const c = new UnreadController();
+    const timerHandler = vi.fn();
+    c.onPostSwitchTimerFire(timerHandler);
+    c.beginConversation(E, 0);
+    expect(timerHandler).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    expect(timerHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('the deferred handler can advance the cursor past the now-elapsed grace window', () => {
+    const c = new UnreadController();
+    const markRead = vi.fn();
+    c.onMarkReadRequested(markRead);
+    // Mirrors chat-page's real handler: gather the DOM facts, then
+    // call back into `onScrollState`.
+    c.onPostSwitchTimerFire(() => {
+      c.onScrollState({
+        entityId: E,
+        lastMessageVisible: true,
+        hasNewerMessages: false,
+        bufferTailId: 'tail-1',
+      });
+    });
+    c.beginConversation(E, 0);
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    expect(markRead).toHaveBeenCalledWith(E);
+  });
+
+  it('a quick conversation flip cancels the in-flight deferred timer', () => {
+    const c = new UnreadController();
+    const timerHandler = vi.fn();
+    c.onPostSwitchTimerFire(timerHandler);
+    c.beginConversation(E, 0);
+    // Flip to another conversation before the grace window elapses —
+    // E's timer is cancelled, E2's is armed fresh.
+    c.beginConversation(E2, 0);
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    // Only one invocation — E2's timer; E's was cancelled.
+    expect(timerHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('endConversation cancels the in-flight deferred timer', () => {
+    const c = new UnreadController();
+    const timerHandler = vi.fn();
+    c.onPostSwitchTimerFire(timerHandler);
+    c.beginConversation(E, 0);
+    c.endConversation();
+    vi.advanceTimersByTime(MARK_READ_GRACE_PERIOD_MS + 1);
+    expect(timerHandler).not.toHaveBeenCalled();
+  });
+});
+
+// ─── maybeReanchorOnLateData ─────────────────────────────────────────────
+
+describe('UnreadController — maybeReanchorOnLateData', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('re-anchors when the anchor was null and the cursor arrives late', () => {
+    const c = new UnreadController();
+    // Begin with an empty lastRead map → null anchor captured.
+    c.ingestBackendData({ unread: {}, last_read: {} }, null);
+    c.beginConversation(E, 0);
+    // The persisted cursor arrives.
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'late-anchor' } }, null);
+    expect(c.maybeReanchorOnLateData(E)).toBe(true);
+    // The re-anchor is observable through the divider projection.
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('late-anchor', false),
+        groupItem('inbound', false),
+      ]),
+    ).toBe(1);
+  });
+
+  it('does not re-anchor when an anchor was already captured at begin', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'orig-anchor' } }, null);
+    c.beginConversation(E, 0);
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'different' } }, null);
+    expect(c.maybeReanchorOnLateData(E)).toBe(false);
+  });
+
+  it('does not re-anchor after mark-read has fired for the conversation', () => {
+    const c = new UnreadController();
+    c.onMarkReadRequested(vi.fn());
+    c.ingestBackendData({ unread: {}, last_read: {} }, null);
+    c.beginConversation(E, 0);
+    // Mark-read fires (pill path bypasses grace).
+    expect(c.onPillJump({ entityId: E, bufferTailId: 'tail-1' })).toBe(true);
+    // The cursor now reflects the conversation tail — re-anchoring
+    // against it would suppress the divider entirely. Must decline.
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'tail-1' } }, null);
+    expect(c.maybeReanchorOnLateData(E)).toBe(false);
+  });
+
+  it('does not re-anchor when the cursor is still absent', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: {} }, null);
+    c.beginConversation(E, 0);
+    expect(c.maybeReanchorOnLateData(E)).toBe(false);
+  });
+
+  it('does not re-anchor when the entityId does not match the active conversation', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E2]: 'x' } }, null);
+    c.beginConversation(E, 0);
+    expect(c.maybeReanchorOnLateData(E2)).toBe(false);
+  });
+
+  it('returns false when no conversation is active', () => {
+    const c = new UnreadController();
+    expect(c.maybeReanchorOnLateData(E)).toBe(false);
+  });
+});
+
+// ─── dividerAfterGroupIdx ────────────────────────────────────────────────
+//
+// Subsumes the four Phase-1 divider-projection tests (which used to
+// live in chat-page.test.ts against the now-deleted
+// `_renderItemsWithDivider` + `_anchorIdAtSelection` privates) and
+// adds the cross-entry send-then-switch case Phase 3 folded in.
+
+describe('UnreadController — dividerAfterGroupIdx', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function withAnchor(anchorId: string, unreadCount = 0): UnreadController {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: anchorId } }, null);
+    c.beginConversation(E, unreadCount);
+    return c;
+  }
+
+  it('returns null when no conversation is active', () => {
+    expect(
+      new UnreadController().dividerAfterGroupIdx([groupItem('a', false)]),
+    ).toBeNull();
+  });
+
+  it('anchor is the last group → no divider (nothing on the unread side)', () => {
+    const c = withAnchor('anchor');
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('m1', false),
+        groupItem('anchor', false),
+      ]),
+    ).toBeNull();
+  });
+
+  it('only an outgoing group after the anchor → no divider (Phase 1 reported bug)', () => {
+    const c = withAnchor('anchor');
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('anchor', false),
+        groupItem('sent', true),
+      ]),
+    ).toBeNull();
+  });
+
+  it('an inbound group after the anchor → divider renders above it', () => {
+    const c = withAnchor('anchor');
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('anchor', false),
+        groupItem('inbound', false),
+      ]),
+    ).toBe(1);
+  });
+
+  it('inbound then outgoing after the anchor → divider above the inbound group', () => {
+    const c = withAnchor('anchor');
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('anchor', false),
+        groupItem('inbound', false),
+        groupItem('reply', true),
+      ]),
+    ).toBe(1);
+  });
+
+  it('outgoing then inbound after the anchor → divider skips the leading outgoing run (send-then-switch fix)', () => {
+    // The cross-entry send-then-switch bug: the user sent a message
+    // (msg-sent) then navigated away before the cursor advanced, so
+    // the anchor sits before their own send. A genuine inbound message
+    // (msg-inbound) follows. The divider must land above the inbound
+    // message, NOT above the user's own send.
+    const c = withAnchor('anchor');
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('anchor', false),
+        groupItem('msg-sent', true),
+        groupItem('msg-inbound', false),
+      ]),
+    ).toBe(2);
+  });
+
+  it('multiple leading outgoing groups after the anchor are all skipped', () => {
+    const c = withAnchor('anchor');
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('anchor', false),
+        groupItem('s1', true),
+        groupItem('s2', true),
+        groupItem('in', false),
+      ]),
+    ).toBe(3);
+  });
+
+  it('date separators do not count toward the group index', () => {
+    const c = withAnchor('anchor');
+    expect(
+      c.dividerAfterGroupIdx([
+        dateSep(),
+        groupItem('anchor', false),
+        dateSep(),
+        groupItem('inbound', false),
+      ]),
+    ).toBe(1);
+  });
+
+  it('falls back to count-based positioning when the anchor is not in the rendered buffer', () => {
+    // Anchor 'pruned' is not among the render items → count fallback.
+    // 4 message groups, unreadCount 2 → divider at index 4 - 2 = 2.
+    const c = withAnchor('pruned', 2);
+    expect(
+      c.dividerAfterGroupIdx([
+        groupItem('a', false),
+        groupItem('b', false),
+        groupItem('c', false),
+        groupItem('d', false),
+      ]),
+    ).toBe(2);
+  });
+
+  it('count-based fallback clamps a negative index to 0', () => {
+    const c = withAnchor('pruned', 10);
+    expect(
+      c.dividerAfterGroupIdx([groupItem('a', false), groupItem('b', false)]),
+    ).toBe(0);
+  });
+
+  it('no anchor and zero count → no divider', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: {} }, null);
+    c.beginConversation(E, 0);
+    expect(
+      c.dividerAfterGroupIdx([groupItem('a', false), groupItem('b', false)]),
+    ).toBeNull();
   });
 });

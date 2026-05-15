@@ -852,7 +852,6 @@ export class MeshCorePanel extends LitElement {
             .unread=${this._unread}
             .selectedId=${this._pendingChatTarget}
             .narrow=${this.narrow}
-            @unread-cleared=${this._onUnreadCleared}
             @active-entity-changed=${this._onActiveEntityChanged}
             @contacts-changed=${() => this._loadDeviceData()}
             @channels-changed=${() => this._loadDeviceData()}></meshcore-chat-page>`;
@@ -995,25 +994,6 @@ export class MeshCorePanel extends LitElement {
     }
   }
 
-  private _onUnreadCleared(e: CustomEvent) {
-    const { entityId } = e.detail;
-    if (entityId) {
-      // Immediately zero out the count locally — don't wait for the
-      // backend event. `clearEntity` is a no-op when the entity has
-      // no positive count, matching the prior inline guard.
-      this._unread.clearEntity(entityId);
-    }
-    // Phase 4 (Change 9): mark_read also snapshotted a new last-read
-    // cursor on the backend. Refresh the maps so the next conversation
-    // open uses the just-advanced cursor as its anchor. The 2 s save
-    // debounce on UnreadTracker means the persisted file may lag the
-    // in-memory cursor by up to that long, but the in-memory map is
-    // updated synchronously inside `ws_mark_read`, so a fresh
-    // `get_unread_counts` round-trip immediately reflects the new
-    // value.
-    this._loadUnreadCounts();
-  }
-
   private _onActiveEntityChanged(e: CustomEvent) {
     this._activeChatEntityId = e.detail?.entityId || null;
   }
@@ -1066,14 +1046,18 @@ export class MeshCorePanel extends LitElement {
   }
 
   /**
-   * Phase 2: the panel's mark-read-requested handler (registered with
-   * the controller in the constructor). Owns the mark-read WS
-   * round-trip plus the unread bookkeeping — optimistic local zero +
-   * an authoritative refresh. Registered-but-unfired in Phase 2; the
-   * emitter (the controller's read-progress mutators) lands in
-   * Phase 3, at which point this becomes the sole owner of the
-   * round-trip and chat-page's direct `markConversationRead` call in
-   * `_markActiveRead` is retired.
+   * The panel's mark-read-requested handler (registered with the
+   * controller in the constructor). Owns the mark-read WS round-trip
+   * plus the unread bookkeeping — optimistic local zero + an
+   * authoritative refresh.
+   *
+   * Phase 3 made this live: the controller's read-progress mutators
+   * (`onScrollState` / `onPillJump`, via the deferred post-switch
+   * timer) now call `requestMarkRead`, which fires this handler. It is
+   * the sole owner of the mark-read round-trip — chat-page's old
+   * direct `markConversationRead` call (in the retired `_markActiveRead`)
+   * and the `unread-cleared` event + `_onUnreadCleared` handler are
+   * all gone.
    */
   private _handleMarkReadRequested(entityId: string) {
     if (!entityId || !this.hass) return;
