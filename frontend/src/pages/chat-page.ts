@@ -2,6 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { HomeAssistant, PanelConfig, Contact, Channel, ChatMessage } from '../types';
 import { MessageStore } from '../chat/message-store';
+import { UnreadController } from '../chat/unread-controller';
 import { buildRenderItems } from '../chat/message-parser';
 import { discoverChannelEntity, discoverContactEntity } from '../chat/entity-resolver';
 import { markConversationRead, sendDirectMessage, sendChannelMessage } from '../api';
@@ -22,19 +23,34 @@ export class ChatPage extends LitElement {
   @property({ type: Array }) conversations: Array<Contact | Channel> = [];
   @property({ type: String }) selectedId: string | null = null;
   @property({ type: Boolean }) narrow = false;
-  @property({ type: Object }) unreadCounts: Record<string, number> = {};
   /**
-   * Phase 4 (Change 9): per-entity "last-read" message-ID cursor map,
-   * sourced from the backend's `meshcore_chat/get_unread_counts`
-   * payload. Used by `_onConversationSelected` to drive anchor-based
-   * open via `MessageStore.switchEntity(entityId, anchor)`, and by
-   * `_renderItemsWithDivider` to position the divider AFTER the anchor
-   * message in the rendered list (first item below the divider = first
-   * unread message).
+   * Phase 2 (Unify Unread State): the panel-owned `UnreadController`.
+   * chat-page `subscribe`s to it in `connectedCallback` and
+   * unsubscribes — but does NOT destroy it — in
+   * `disconnectedCallback` (the controller outlives chat-page, which
+   * is remounted on tab switch). The badge projection
+   * (`_getUnreadCountForSelected`, and `<conversation-list>` via
+   * `unread.counts` / `unread.badgeCount`) reads from it directly.
+   */
+  @property({ attribute: false }) unread!: UnreadController;
+  /**
+   * Phase 4 (Change 9): per-entity "last-read" message-ID cursor map.
+   * Phase 2: no longer parent-fed — mirrored from `unread.lastRead`
+   * by the controller subscription (and an initial sync in
+   * `connectedCallback`). Kept as a reactive property so the
+   * late-arriving-`lastRead` re-anchor block in `updated()` still
+   * sees `changedProperties.has('lastRead')`. Used by
+   * `_onConversationSelected` to drive anchor-based open via
+   * `MessageStore.switchEntity(entityId, anchor)`, and by
+   * `_renderItemsWithDivider` to position the divider AFTER the
+   * anchor message. (The read-progress machine that owns this moves
+   * into the controller in Phase 3.)
    */
   @property({ type: Object }) lastRead: Record<string, string> = {};
 
   @state() private _messageStore: MessageStore | null = null;
+  /** Unsubscribe handle for the `UnreadController` subscription. */
+  private _unsubUnread: (() => void) | null = null;
   @state() private _inputText = '';
   @state() private _sending = false;
   @state() private _viewportNarrow = false;
@@ -483,6 +499,25 @@ export class ChatPage extends LitElement {
       this._messageStore = new MessageStore(this.config);
       this._messageStore.setOnChange(() => this.requestUpdate());
     }
+    // Phase 2: subscribe to the panel-owned UnreadController. Lit
+    // commits property bindings before `connectedCallback` runs (same
+    // as `this.config` above), so `this.unread` is available here.
+    // The controller OUTLIVES chat-page — we subscribe here and
+    // unsubscribe (but do NOT destroy) in `disconnectedCallback`.
+    if (this.unread && !this._unsubUnread) {
+      this._unsubUnread = this.unread.subscribe(() => {
+        // Mirror `lastRead` so the Phase-3 late-arriving-anchor block
+        // in `updated()` still sees `changedProperties.has('lastRead')`.
+        // `ingestBackendData` rebuilds the controller's lastRead map
+        // (fresh identity); `clearEntity` does not — so also force a
+        // re-render explicitly to keep the badge projection live.
+        this.lastRead = this.unread.lastRead;
+        this.requestUpdate();
+      });
+      // The subscription only fires on FUTURE mutations — pull the
+      // current cursor map in now so the first render is correct.
+      this.lastRead = this.unread.lastRead;
+    }
     // Use matchMedia for reliable viewport-based narrow detection
     // 870px matches HA's own narrow threshold (companion app WebViews report wider CSS viewports)
     this._mediaQuery = window.matchMedia('(max-width: 870px)');
@@ -498,6 +533,13 @@ export class ChatPage extends LitElement {
     if (this._messageStore) {
       this._messageStore.destroy();
       this._messageStore = null;
+    }
+    // Phase 2: unsubscribe from the UnreadController — but do NOT
+    // destroy it. It is panel-owned and outlives chat-page (chat-page
+    // is remounted on every tab switch; the controller is not).
+    if (this._unsubUnread) {
+      this._unsubUnread();
+      this._unsubUnread = null;
     }
     if (this._mediaQuery && this._mediaHandler) {
       this._mediaQuery.removeEventListener('change', this._mediaHandler);
@@ -663,7 +705,8 @@ export class ChatPage extends LitElement {
             <meshcore-conversation-list
               .conversations=${this.conversations}
               .activeId=${this.selectedId}
-              .unreadCounts=${this.unreadCounts}
+              .unread=${this.unread}
+              .unreadCounts=${this.unread.counts}
               .nodePrefix=${this.config?.node_prefix || null}
               @conversation-selected=${(e: CustomEvent) => {
                 const newId = e.detail.id;
@@ -697,7 +740,8 @@ export class ChatPage extends LitElement {
         <meshcore-conversation-list
           .conversations=${this.conversations}
           .activeId=${this.selectedId}
-          .unreadCounts=${this.unreadCounts}
+          .unread=${this.unread}
+          .unreadCounts=${this.unread.counts}
           .nodePrefix=${this.config?.node_prefix || null}
           @conversation-selected=${(e: CustomEvent) => {
             const newId = e.detail.id;
@@ -1602,33 +1646,19 @@ export class ChatPage extends LitElement {
   }
 
   private _getUnreadCountForSelected(): number {
-    if (!this.selectedId || !this.unreadCounts) return 0;
-    // Check direct match on resolved entity_id first (most reliable)
-    if (this._currentEntityId && this.unreadCounts[this._currentEntityId]) {
-      return this.unreadCounts[this._currentEntityId];
-    }
-    // Fallback: match using entity naming patterns.
-    // Phase 4 (F-B): Channel matches require the node_prefix to avoid
-    // cross-entry contamination on same-numbered channels. When node_prefix
-    // is unavailable (initial render before config arrives, or single-entry
-    // installs), fall back to suffix-only match for back-compat.
-    const nodePrefix = this.config?.node_prefix;
-    for (const [entityId, count] of Object.entries(this.unreadCounts)) {
-      if (count <= 0) continue;
-      if (/^\d+$/.test(this.selectedId)) {
-        // Channel: match _ch_{idx}_messages, scoped by node_prefix when known
-        if (nodePrefix) {
-          if (entityId.endsWith(`meshcore_${nodePrefix}_ch_${this.selectedId}_messages`)) return count;
-        } else if (entityId.endsWith(`_ch_${this.selectedId}_messages`)) {
-          return count;
-        }
-      } else {
-        // Contact: match _{first6chars}_messages (globally unique)
-        const prefix6 = this.selectedId.substring(0, 6);
-        if (entityId.endsWith(`_${prefix6}_messages`)) return count;
-      }
-    }
-    return 0;
+    if (!this.selectedId || !this.unread) return 0;
+    // Phase 2: unified badge projection. `badgeCount` folds in the
+    // former direct-`_currentEntityId`-key fast path plus the shared
+    // node_prefix-scoped pattern fallback (Phase 4 F-B: channel
+    // matches require the node_prefix to avoid cross-entry
+    // contamination on same-numbered channels; null node_prefix →
+    // suffix-only match). One implementation now backs both this and
+    // `conversation-list._getUnreadCount`.
+    return this.unread.badgeCount(
+      this.selectedId,
+      this.config?.node_prefix ?? null,
+      this._currentEntityId,
+    );
   }
 
   private _onSearchResultSelected(e: CustomEvent) {

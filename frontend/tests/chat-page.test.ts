@@ -45,6 +45,7 @@ vi.mock('../src/chat/entity-resolver', () => ({
 // versions.
 import '../src/pages/chat-page';
 import type { ChatPage } from '../src/pages/chat-page';
+import { UnreadController } from '../src/chat/unread-controller';
 import { markConversationRead } from '../src/api';
 import { MARK_READ_GRACE_PERIOD_MS } from '../src/constants';
 import type {
@@ -200,14 +201,22 @@ async function mountChatPage(opts: {
   const lastRead = opts.lastRead ?? {};
   const selectedId = opts.selectedId ?? null;
 
+  // Phase 2: chat-page is fed unread state through the panel-owned
+  // `UnreadController` rather than `.unreadCounts` / `.lastRead`
+  // props. Construct one, seed it with the test's backend snapshot,
+  // and bind it. chat-page mirrors `lastRead` off the controller in
+  // `connectedCallback`; tests that simulate a late-arriving cursor
+  // still assign `page.lastRead` directly afterward.
+  const unread = new UnreadController();
+  unread.ingestBackendData({ unread: unreadCounts, last_read: lastRead }, null);
+
   render(
     html`
       <meshcore-chat-page
         .hass=${hass}
         .config=${config}
         .conversations=${conversations}
-        .unreadCounts=${unreadCounts}
-        .lastRead=${lastRead}
+        .unread=${unread}
         .selectedId=${selectedId}
         .narrow=${false}
       ></meshcore-chat-page>
