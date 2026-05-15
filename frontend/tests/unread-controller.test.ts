@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UnreadController } from '../src/chat/unread-controller';
+import { UnreadController, pillLabel } from '../src/chat/unread-controller';
 import { MARK_READ_GRACE_PERIOD_MS } from '../src/constants';
 import type { RenderItem } from '../src/types';
 
@@ -897,5 +897,139 @@ describe('UnreadController — dividerAfterGroupIdx', () => {
     expect(
       c.dividerAfterGroupIdx([groupItem('a', false), groupItem('b', false)]),
     ).toBeNull();
+  });
+});
+
+// ─── Phase 4: the pill's data needs ──────────────────────────────────────
+//
+// `cursorAtTail` and the pure `pillLabel` helper. The pill itself
+// (`_renderNewMessagesIndicator`) stays in chat-page — it depends on
+// chat-page render state (`_pendingScroll` / `_scrollInFlight`) and a
+// DOM probe (`_hasContentBelowViewport`) — so the chat-page pill
+// matrix in chat-page.test.ts §"Phase 4 — indicator visibility" still
+// pins the end-to-end render. These unit tests pin the two pieces
+// Phase 4 moved into the controller.
+
+describe('UnreadController — cursorAtTail', () => {
+  it('returns false when entityId is null', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'tail' } }, null);
+    expect(c.cursorAtTail(null, 'tail')).toBe(false);
+  });
+
+  it('returns false when bufferTailId is null', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'tail' } }, null);
+    expect(c.cursorAtTail(E, null)).toBe(false);
+  });
+
+  it('returns true when the cursor equals the buffer tail', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'tail' } }, null);
+    expect(c.cursorAtTail(E, 'tail')).toBe(true);
+  });
+
+  it('returns false when the cursor is behind the buffer tail', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'older' } }, null);
+    expect(c.cursorAtTail(E, 'newer')).toBe(false);
+  });
+
+  it('returns false when the entity has no cursor in the map', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E2]: 'tail' } }, null);
+    expect(c.cursorAtTail(E, 'tail')).toBe(false);
+  });
+
+  it('tracks the latest ingested cursor', () => {
+    const c = new UnreadController();
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'old' } }, null);
+    expect(c.cursorAtTail(E, 'new')).toBe(false);
+    c.ingestBackendData({ unread: {}, last_read: { [E]: 'new' } }, null);
+    expect(c.cursorAtTail(E, 'new')).toBe(true);
+  });
+});
+
+describe('pillLabel', () => {
+  it('counter > 0 → "↓ N new" regardless of the other inputs', () => {
+    expect(
+      pillLabel({
+        counter: 4,
+        hasNewer: false,
+        hasContentBelow: false,
+        cursorAtTail: true,
+      }),
+    ).toBe('↓ 4 new');
+    expect(
+      pillLabel({
+        counter: 1,
+        hasNewer: true,
+        hasContentBelow: true,
+        cursorAtTail: false,
+      }),
+    ).toBe('↓ 1 new');
+  });
+
+  it('counter 0, no unloaded newer, nothing below the viewport → null (suppress)', () => {
+    expect(
+      pillLabel({
+        counter: 0,
+        hasNewer: false,
+        hasContentBelow: false,
+        cursorAtTail: false,
+      }),
+    ).toBeNull();
+    // cursorAtTail does not rescue a suppressed pill.
+    expect(
+      pillLabel({
+        counter: 0,
+        hasNewer: false,
+        hasContentBelow: false,
+        cursorAtTail: true,
+      }),
+    ).toBeNull();
+  });
+
+  it('counter 0, cursor at tail, content below, no unloaded newer → "↓ latest"', () => {
+    expect(
+      pillLabel({
+        counter: 0,
+        hasNewer: false,
+        hasContentBelow: true,
+        cursorAtTail: true,
+      }),
+    ).toBe('↓ latest');
+  });
+
+  it('counter 0, cursor NOT at tail, content below → "↓ unread"', () => {
+    expect(
+      pillLabel({
+        counter: 0,
+        hasNewer: false,
+        hasContentBelow: true,
+        cursorAtTail: false,
+      }),
+    ).toBe('↓ unread');
+  });
+
+  it('counter 0, hasNewer true → "↓ unread" even when cursorAtTail is true', () => {
+    // Unloaded newer messages exist on disk past the buffer tail, so
+    // the cursor matching the *buffer* tail does not mean "caught up".
+    expect(
+      pillLabel({
+        counter: 0,
+        hasNewer: true,
+        hasContentBelow: false,
+        cursorAtTail: true,
+      }),
+    ).toBe('↓ unread');
+    expect(
+      pillLabel({
+        counter: 0,
+        hasNewer: true,
+        hasContentBelow: true,
+        cursorAtTail: true,
+      }),
+    ).toBe('↓ unread');
   });
 });

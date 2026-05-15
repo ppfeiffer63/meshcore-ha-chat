@@ -2,7 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { HomeAssistant, PanelConfig, Contact, Channel } from '../types';
 import { MessageStore } from '../chat/message-store';
-import { UnreadController } from '../chat/unread-controller';
+import { UnreadController, pillLabel } from '../chat/unread-controller';
 import { buildRenderItems } from '../chat/message-parser';
 import { discoverChannelEntity, discoverContactEntity } from '../chat/entity-resolver';
 import { sendDirectMessage, sendChannelMessage } from '../api';
@@ -916,7 +916,6 @@ export class ChatPage extends LitElement {
     //     read is decided by the label logic below; the pill itself
     //     just provides the jump.
     const hasContentBelow = this._hasContentBelowViewport();
-    if (counter === 0 && !hasNewer && !hasContentBelow) return html``;
     // Label semantics:
     //   "↓ N new" — N realtime arrivals accumulated while the user was
     //               not at bottom (most precise; user knows exactly how
@@ -930,26 +929,27 @@ export class ChatPage extends LitElement {
     //                so the pill is just a "jump to current" affordance.
     //                Avoids the misleading "↓ unread" label after
     //                mark_read fires.
+    //   null       — nothing below the viewport (counter 0, no unloaded
+    //                newer, last bubble visible) → suppress the pill.
     //
-    // Cursor-at-conversation-tail check: `!hasNewer` ensures the buffer
-    // tail IS the conversation's newest (no unloaded content past it),
-    // and `lastRead[entityId] === latestNonTempId()` confirms the
-    // backend cursor matches the buffer tail. The latter uses the
-    // parent-bound `lastRead` map, which `_onUnreadCleared` refreshes
-    // after every mark_read round-trip.
-    let label: string;
-    if (counter > 0) {
-      label = `↓ ${counter} new`;
-    } else {
-      const entityId = this._currentEntityId;
-      const tailId = this._latestNonTempMessageId();
-      const cursorAtTail =
-        !hasNewer
-        && entityId !== null
-        && tailId !== null
-        && this.lastRead?.[entityId] === tailId;
-      label = cursorAtTail ? `↓ latest` : `↓ unread`;
-    }
+    // Phase 4: the label semantics are centralized in the pure
+    // `pillLabel` helper, and the cursor-at-conversation-tail query is
+    // the controller's `cursorAtTail` (reading the controller's
+    // authoritative `_lastRead` map — the pill no longer consults
+    // chat-page's `lastRead` mirror). `!hasNewer` (a `MessageStore`
+    // fact, not controller state) stays a `pillLabel` input. The
+    // render-state early returns above (`_pendingScroll` /
+    // `_scrollInFlight`) cannot move into the pure helper.
+    const label = pillLabel({
+      counter,
+      hasNewer,
+      hasContentBelow,
+      cursorAtTail: this.unread.cursorAtTail(
+        this._currentEntityId,
+        this._latestNonTempMessageId(),
+      ),
+    });
+    if (label === null) return html``;
     return html`
       <button class="new-messages-indicator" @click=${this._jumpToBottom}>
         ${label}

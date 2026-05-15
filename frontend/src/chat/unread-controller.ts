@@ -96,8 +96,12 @@ export interface ReadProgress {
  * results in; the controller owns the gates (grace window, dedup,
  * `hasNewerMessages`) and the cursor mutation.
  *
- * `cursorAtTail` (the pill's data need) is NOT here yet — it migrates
- * in Phase 4. See `docs/Proposed - Unify Unread State (Frontend).md`.
+ * Phase 4 surface: the pill's data needs — the `cursorAtTail` query
+ * and the pure `pillLabel` helper (an exported free function below the
+ * class). The pill (`_renderNewMessagesIndicator`) stays in chat-page
+ * (it depends on chat-page render state + a DOM probe); it only
+ * *consults* the controller. See
+ * `docs/Proposed - Unify Unread State (Frontend).md`.
  *
  * Lifetime: constructed once by `meshcore-chat-panel.ts` and owned by
  * the panel. The panel is not remounted on tab switch, so the badge
@@ -575,4 +579,74 @@ export class UnreadController {
 
     return null;
   }
+
+  /**
+   * Pill projection (Phase 4): is the backend last-read cursor already
+   * at the buffer tail? "At tail" means the persisted cursor for
+   * `entityId` equals `bufferTailId` — the newest non-temp message id
+   * chat-page passes in (`_latestNonTempMessageId()`).
+   *
+   * `_renderNewMessagesIndicator` consults this to pick the pill's
+   * "↓ latest" (caught up, just scrolled away) vs "↓ unread" (real
+   * unread below the viewport) label. It replaces the inline
+   * `lastRead[entityId] === _latestNonTempMessageId()` check the pill
+   * used to run against chat-page's `lastRead` reactive-property
+   * mirror — the controller's `_lastRead` map is the authoritative
+   * source, so the pill no longer depends on the mirror. (The mirror
+   * itself stays: the `updated()` late-arriving-`lastRead` re-anchor
+   * block still needs it as its `changedProperties.has('lastRead')`
+   * reactive trigger — see chat-page `updated()`.)
+   *
+   * The `!hasNewerMessages` half of the old composite stays in
+   * chat-page / `pillLabel`: `hasNewerMessages` is `MessageStore`
+   * state, not controller state. Returns false on a null entity or
+   * null buffer tail — cannot be "at tail" with no tail to be at;
+   * matches the pre-refactor `entityId !== null && tailId !== null`
+   * guard.
+   */
+  cursorAtTail(entityId: string | null, bufferTailId: string | null): boolean {
+    if (!entityId || bufferTailId === null) return false;
+    return this._lastRead[entityId] === bufferTailId;
+  }
+}
+
+/**
+ * Pure label-selection helper for the "↓ N new" / "↓ unread" /
+ * "↓ latest" jump-to-current pill (Phase 4). Centralizes the label
+ * semantics that used to be inlined in chat-page's
+ * `_renderNewMessagesIndicator`. A free function, not a method: it
+ * touches no controller state — every input is a chat-page-gathered
+ * fact passed in.
+ *
+ * Inputs:
+ *   - counter:         `MessageStore.newMessagesWhileAway`
+ *   - hasNewer:        `MessageStore.hasNewerMessages`
+ *   - hasContentBelow: chat-page's `_hasContentBelowViewport()` DOM probe
+ *   - cursorAtTail:    `UnreadController.cursorAtTail(entityId, bufferTailId)`
+ *
+ * Returns the label string, or `null` when the pill should be
+ * suppressed. Semantics preserved verbatim from the pre-Phase-4 inline
+ * logic:
+ *   - counter > 0                          → "↓ {counter} new"
+ *   - counter 0, !hasNewer, !hasContentBelow → null (nothing below the
+ *                                             viewport — suppress)
+ *   - counter 0, cursorAtTail, !hasNewer    → "↓ latest" (caught up,
+ *                                             scrolled away — a pure
+ *                                             jump affordance)
+ *   - otherwise                             → "↓ unread" (real unread
+ *                                             below the viewport)
+ *
+ * The render-state early returns (`_pendingScroll` / `_scrollInFlight`)
+ * stay in `_renderNewMessagesIndicator` — they are chat-page render
+ * state this pure helper cannot see.
+ */
+export function pillLabel(s: {
+  counter: number;
+  hasNewer: boolean;
+  hasContentBelow: boolean;
+  cursorAtTail: boolean;
+}): string | null {
+  if (s.counter > 0) return `↓ ${s.counter} new`;
+  if (!s.hasNewer && !s.hasContentBelow) return null;
+  return s.cursorAtTail && !s.hasNewer ? `↓ latest` : `↓ unread`;
 }

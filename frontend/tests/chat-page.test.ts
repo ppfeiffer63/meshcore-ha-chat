@@ -198,8 +198,16 @@ async function mountChatPage(opts: {
   // `UnreadController` rather than `.unreadCounts` / `.lastRead`
   // props. Construct one, seed it with the test's backend snapshot,
   // and bind it. chat-page mirrors `lastRead` off the controller in
-  // `connectedCallback`; tests that simulate a late-arriving cursor
-  // still assign `page.lastRead` directly afterward.
+  // `connectedCallback`.
+  //
+  // Phase 4: the pill's cursor-at-tail query (`unread.cursorAtTail`)
+  // reads the controller's authoritative `_lastRead` map, not
+  // chat-page's mirror — so tests that simulate a cursor position
+  // seed it via `page.unread.ingestBackendData({ unread, last_read })`
+  // rather than assigning `page.lastRead` directly. (The mirror still
+  // exists — the `updated()` late-arriving re-anchor block needs it as
+  // its `changedProperties.has('lastRead')` trigger — but it is no
+  // longer the pill's input.)
   const unread = new UnreadController();
   unread.ingestBackendData({ unread: unreadCounts, last_read: lastRead }, null);
 
@@ -624,7 +632,12 @@ describe('Phase 4 — indicator visibility', () => {
     ];
     (store as unknown as { _hasNewerMessages: boolean })._hasNewerMessages = false;
     (store as unknown as { _newMessagesWhileAway: number })._newMessagesWhileAway = 0;
-    page.lastRead = { [entityId]: 'msg-tail-id' };
+    // Cursor at the buffer tail — seed the controller (the pill's
+    // `cursorAtTail` query reads the controller, not the mirror).
+    page.unread.ingestBackendData(
+      { unread: {}, last_read: { [entityId]: 'msg-tail-id' } },
+      null,
+    );
     // Stub the unread-below-viewport check to true (user is scrolled
     // up; the divider is still rendered above the viewport, last
     // bubble below).
@@ -669,8 +682,12 @@ describe('Phase 4 — indicator visibility', () => {
     (store as unknown as { _newMessagesWhileAway: number })._newMessagesWhileAway = 0;
     // Cursor is at the buffer tail (conversation has been fully read
     // — possibly never had unread on this visit, so no divider was
-    // rendered).
-    page.lastRead = { [entityId]: 'msg-only' };
+    // rendered). Seed the controller — the pill's `cursorAtTail` query
+    // reads the controller's `_lastRead`, not chat-page's mirror.
+    page.unread.ingestBackendData(
+      { unread: {}, last_read: { [entityId]: 'msg-only' } },
+      null,
+    );
     (page as unknown as { _hasContentBelowViewport: () => boolean })._hasContentBelowViewport =
       () => true;
     clearScrollSettlingState(page);
@@ -807,8 +824,13 @@ describe('Phase 4 — indicator visibility', () => {
     ];
     (store as unknown as { _hasNewerMessages: boolean })._hasNewerMessages = false;
     (store as unknown as { _newMessagesWhileAway: number })._newMessagesWhileAway = 0;
-    // Cursor at older message → newer is unread.
-    page.lastRead = { [entityId]: 'msg-older' };
+    // Cursor at older message → newer is unread. Seed the controller —
+    // the pill's `cursorAtTail` query reads the controller's
+    // `_lastRead`, not chat-page's mirror.
+    page.unread.ingestBackendData(
+      { unread: {}, last_read: { [entityId]: 'msg-older' } },
+      null,
+    );
     (page as unknown as { _hasContentBelowViewport: () => boolean })._hasContentBelowViewport =
       () => true;
     clearScrollSettlingState(page);
