@@ -107,6 +107,15 @@ export class ChatPage extends LitElement {
       padding: 8px 12px;
       background: var(--chat-bg);
       position: relative;
+      /* Disable browser-level scroll anchoring. The lazy-load-older
+       * path in _onChatScroll manually preserves scroll position by
+       * adding the prepended content height to scrollTop. With the
+       * default (overflow-anchor: auto), the browser ALSO shifts
+       * scrollTop by the prepended height -- and the two
+       * compensations stack, landing the viewport past the divider
+       * at the new buffer tail. That misfires mark-read on channel
+       * re-entry. See 2026-05-15 unread-clearing investigation. */
+      overflow-anchor: none;
     }
 
     .chat-container::-webkit-scrollbar {
@@ -1296,6 +1305,26 @@ export class ChatPage extends LitElement {
             const addedHeight = newScrollHeight - prevScrollHeight;
             if (addedHeight > 0) {
               container.scrollTop += addedHeight;
+              // The scrollTop adjustment above emits a synthetic scroll
+              // event. Guard mark-read from firing in response: without
+              // this, the re-entrant `_onChatScroll` invocation can see
+              // `lastMessageVisible: true` after the compensation lands
+              // the viewport near the new buffer tail (channels with
+              // long history hit this; DMs typically don't because they
+              // have no older messages to load). The user did not
+              // actively scroll to the tail — the layout did. See the
+              // 2026-05-15 unread-clearing investigation; the 500 ms
+              // window matches the requestAnimationFrame + lit-render
+              // settle time after a prepend.
+              // 1500 ms covers both the synthetic scroll event from
+              // the `scrollTop +=` above (~immediate) AND the
+              // post-switch deferred timer (which fires at
+              // MARK_READ_GRACE_PERIOD_MS = 1000 ms after the
+              // conversation switch). The post-switch timer would
+              // otherwise see the post-compensation viewport state
+              // (potentially at the new buffer tail) and fire
+              // mark-read for a position the user never scrolled to.
+              this._scrollGuardUntil = Date.now() + 1500;
             }
           });
         });
@@ -1308,8 +1337,15 @@ export class ChatPage extends LitElement {
       if (store.hasNewerMessages && !store.loadingNewer) {
         // (ii) Append newer messages — no scroll correction needed.
         store.loadNewerMessages();
-      } else if (!store.hasNewerMessages) {
+      } else if (!store.hasNewerMessages && !this._isScrollGuarded()) {
         // (iii) Buffer tail IS the conversation's newest message.
+        // Skip when scroll-guarded — a recent programmatic scroll
+        // (the initial conversation-switch scroll-to-divider OR a
+        // lazy-load-older compensation) emitted a synthetic scroll
+        // event, and that does not count as user engagement with the
+        // message tail. The guard expires automatically; a real
+        // user-initiated scroll within the same near-bottom region
+        // after the window closes will re-trigger this branch.
         this._checkAndMarkReadIfAtBottom();
       }
     }
@@ -1397,6 +1433,20 @@ export class ChatPage extends LitElement {
    * indicator counter, since the user is now caught up.
    */
   private _checkAndMarkReadIfAtBottom(): void {
+    // Single-point scroll-guard check — gates all three callers
+    // (`_onChatScroll`, `_scrollToBottomIfNearEnd`, and the post-switch
+    // deferred-timer handler registered via `onPostSwitchTimerFire`).
+    // The guard is set when a programmatic scroll lands the viewport
+    // somewhere the user did not actively scroll to — the
+    // conversation-switch scroll-to-divider, OR the lazy-load-older
+    // scrollTop compensation. Without this gate, mark-read fires for
+    // viewport states the user never engaged with (concretely: long-
+    // history channels where the initial buffer is smaller than the
+    // anchor's distance from the conversation tail, the divider
+    // scroll lands near the top of the small buffer, lazy-load-older
+    // prepends a large block of history, and the compensation can
+    // land the viewport at the new buffer tail).
+    if (this._isScrollGuarded()) return;
     const store = this._messageStore;
     if (!this._currentEntityId || !store) return;
     const fired = this.unread.onScrollState({

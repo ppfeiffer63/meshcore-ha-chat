@@ -216,16 +216,32 @@ export class UnreadController {
 
   /**
    * Replace the unread + last-read maps from a fresh backend payload.
-   * Zeroes the actively-viewed conversation's count (the user is
-   * already reading it) — this folds in the zeroing the panel's
-   * `_loadUnreadCounts` did inline before the controller existed.
+   *
+   * The backend cursor is the single source of truth for the badge: a
+   * conversation has unread iff its persisted cursor is not at the
+   * tail. Mark-read (fired from the scroll-driven `onScrollState` and
+   * the post-switch deferred re-check) is what advances the cursor and
+   * clears the count.
+   *
+   * Pre-2026-05-15 this method also zeroed `counts[activeEntityId]` to
+   * hide the badge while the user was viewing the conversation. That
+   * "hide-while-active" heuristic conflicted with the unread-divider
+   * semantics — the user can be IN a conversation but have not yet
+   * seen its unread messages (they're below the viewport). The
+   * heuristic also fired inconsistently: it relied on a
+   * `_loadUnreadCounts` refresh running while the conversation was
+   * active, and those refreshes only happen on `meshcore_unread_updated`
+   * events for *non-active* entities — so the badge zero was
+   * mesh-activity-dependent, intermittently hiding genuine unread
+   * state. The `activeEntityId` parameter is retained (prefixed with
+   * `_` to indicate unused) so call sites in the panel don't have to
+   * change.
    */
-  ingestBackendData(payload: UnreadBackendData, activeEntityId: string | null): void {
-    const counts: Record<string, number> = { ...(payload?.unread ?? {}) };
-    if (activeEntityId && counts[activeEntityId]) {
-      counts[activeEntityId] = 0;
-    }
-    this._counts = counts;
+  ingestBackendData(
+    payload: UnreadBackendData,
+    _activeEntityId: string | null,
+  ): void {
+    this._counts = { ...(payload?.unread ?? {}) };
     this._lastRead = { ...(payload?.last_read ?? {}) };
     this._notify();
   }
