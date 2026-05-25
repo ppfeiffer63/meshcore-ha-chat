@@ -1,7 +1,7 @@
 """Utility helpers for the MeshCore Chat companion integration.
 
-Lifted minimally from upstream `feature/sidebar-panel:utils.py` — only the
-two helpers `ws_api.py` references at module load. The companion's helper
+Lifted minimally from the upstream meshcore integration's `utils.py` — only
+the two helpers `ws_api.py` references at module load. The companion's helper
 intentionally references MESHCORE_DOMAIN (the upstream meshcore domain)
 when building entity_ids, because the entities being addressed live under
 the upstream integration's namespace, not the companion's.
@@ -68,15 +68,15 @@ def format_entity_id(
 def enrich_rx_log_entries(rx_log_data):
     """Backfill ``path_nodes`` and ``hop_count`` on rx_log entries.
 
-    The companion-supporting ``dev/combined`` upstream branch builds
+    The upstream coordinator this companion consumes builds
     rx_log_entry dicts with ``path`` (hex string) and ``path_len`` (int)
-    but omits the two convenience fields that ``feature/sidebar-panel``
-    adds (``path_nodes`` — the per-node split — and ``hop_count`` — an
+    but omits two convenience fields the frontend relies on
+    (``path_nodes`` — the per-node split — and ``hop_count`` — an
     alias for ``path_len``). The companion frontend's bubble code reads
     ``path_nodes`` and ``hop_count``; without enrichment it falls
     through to the "0 hops" fallback even when a real path exists.
 
-    Mirror sidebar-panel's logic here so the stored record matches the
+    Derive those fields here so the stored record matches the
     schema the frontend expects. Per-hop width is taken from the
     propagated protocol field ``path_hash_size`` when present; otherwise
     it is derived from ``len(path) / path_len`` (a flood path is
@@ -96,7 +96,7 @@ def enrich_rx_log_entries(rx_log_data):
         if "path_nodes" not in entry and entry.get("path"):
             raw = entry["path"]
             # Per-hop width in hex chars. A flood path is uniform-width
-            # per packet (originator-stamped; see proposal §Approach), so
+            # per packet (originator-stamped), so
             # one width describes the whole path. Prefer the protocol
             # field path_hash_size (propagated from meshcore-ha). If
             # absent (entries fired before that fix, or any path lacking
