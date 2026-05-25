@@ -77,9 +77,11 @@ def enrich_rx_log_entries(rx_log_data):
     through to the "0 hops" fallback even when a real path exists.
 
     Mirror sidebar-panel's logic here so the stored record matches the
-    schema the frontend expects. Default ``hash_size = 1`` (2 hex chars
-    per node) — matches what upstream `parse_rx_log_data` produces and
-    what was emitted on sidebar-panel.
+    schema the frontend expects. Per-hop width is taken from the
+    propagated protocol field ``path_hash_size`` when present; otherwise
+    it is derived from ``len(path) / path_len`` (a flood path is
+    uniform-width per packet), falling back to 1 byte (2 hex chars) per
+    node only when neither source is usable.
 
     Mutates entries in place. Returns the list (or whatever was passed).
     Returns True if any entry was modified — callers can use this to
@@ -93,8 +95,24 @@ def enrich_rx_log_entries(rx_log_data):
             continue
         if "path_nodes" not in entry and entry.get("path"):
             raw = entry["path"]
-            hs = entry.get("hash_size", 1)
-            n = max(hs * 2, 2)
+            # Per-hop width in hex chars. A flood path is uniform-width
+            # per packet (originator-stamped; see proposal §Approach), so
+            # one width describes the whole path. Prefer the protocol
+            # field path_hash_size (propagated from meshcore-ha). If
+            # absent (entries fired before that fix, or any path lacking
+            # it), derive it: path_len is the hop count and len(raw)//2
+            # the byte count, so bytes-per-hop is their ratio. Fall back
+            # to 1 byte/hop only when neither source is usable.
+            hs = entry.get("path_hash_size")
+            if hs:
+                n = max(hs * 2, 2)
+            else:
+                path_len = entry.get("path_len") or entry.get("hop_count")
+                byte_len = len(raw) // 2
+                if path_len and byte_len % path_len == 0:
+                    n = (byte_len // path_len) * 2
+                else:
+                    n = 2
             entry["path_nodes"] = [raw[i:i + n] for i in range(0, len(raw), n)]
             changed = True
         if "hop_count" not in entry and "path_len" in entry:
