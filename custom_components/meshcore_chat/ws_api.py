@@ -1349,10 +1349,18 @@ async def ws_execute_remote(hass, connection, msg):
 
         # Send login if password is available. send_login_sync blocks
         # until the node confirms login (LOGIN_SUCCESS) or the request
-        # times out, so the empirical sleep is no longer needed. The
-        # return value is intentionally not inspected here (see Phase 2).
+        # times out. A None return means login was not confirmed —
+        # on the simple_repeater firmware a wrong password and a
+        # transient timeout are indistinguishable on the wire (the
+        # node silently ignores a bad login rather than emitting
+        # LOGIN_FAILED), so we proceed with the command and annotate
+        # the response so the user knows the login wasn't confirmed.
+        login_unconfirmed = False
         if password:
-            await coordinator.api.mesh_core.commands.send_login_sync(contact, password)
+            login_result = await coordinator.api.mesh_core.commands.send_login_sync(
+                contact, password
+            )
+            login_unconfirmed = login_result is None
 
         # Send the command
         cmd_result = await coordinator.api.mesh_core.commands.send_cmd(
@@ -1363,6 +1371,8 @@ async def ws_execute_remote(hass, connection, msg):
 
         # Extract meaningful text from Event objects
         resp_text = _format_event_response(cmd_result)
+        if login_unconfirmed:
+            resp_text = f"Login not confirmed — {resp_text}"
 
         connection.send_result(
             msg["id"],
@@ -1606,10 +1616,18 @@ async def ws_remove_neighbor(hass, connection, msg):
 
         # Send login if password is available. send_login_sync blocks
         # until the node confirms login (LOGIN_SUCCESS) or the request
-        # times out, so the empirical sleep is no longer needed. The
-        # return value is intentionally not inspected here (see Phase 2).
+        # times out. A None return means login was not confirmed —
+        # on the simple_repeater firmware a wrong password and a
+        # transient timeout are indistinguishable on the wire (the
+        # node silently ignores a bad login rather than emitting
+        # LOGIN_FAILED), so we proceed with the command and annotate
+        # the response so the user knows the login wasn't confirmed.
+        login_unconfirmed = False
         if password:
-            await coordinator.api.mesh_core.commands.send_login_sync(contact, password)
+            login_result = await coordinator.api.mesh_core.commands.send_login_sync(
+                contact, password
+            )
+            login_unconfirmed = login_result is None
 
         # Send neighbor.remove command to the repeater
         cmd_result = await coordinator.api.mesh_core.commands.send_cmd(
@@ -1617,6 +1635,8 @@ async def ws_remove_neighbor(hass, connection, msg):
         )
 
         resp_text = _format_event_response(cmd_result)
+        if login_unconfirmed:
+            resp_text = f"Login not confirmed — {resp_text}"
 
         # Remove neighbor entities and tracking from HA.
         #

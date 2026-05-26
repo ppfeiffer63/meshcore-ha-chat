@@ -1193,7 +1193,14 @@ export class DevicesPage extends LitElement {
 
     try {
       const result = await executeRemote(this.hass, device.pubkey_prefix, command, this.config?.entry_id);
-      this._showStatusMessage(`${device.name}: ${command} → ${result.response || 'OK'}`, 'success');
+      // executeRemote() catches WS errors and returns { success: false, response }
+      // rather than throwing, so we must check result.success here — a thrown
+      // error only happens for client-side exceptions (caught below).
+      if (result.success) {
+        this._showStatusMessage(`${device.name}: ${command} → ${result.response || 'OK'}`, 'success');
+      } else {
+        this._showStatusMessage(`${device.name}: ${command} failed — ${result.response || 'error'}`, 'error');
+      }
     } catch (error) {
       this._showStatusMessage(`${device.name}: ${command} failed — ${String(error)}`, 'error');
     }
