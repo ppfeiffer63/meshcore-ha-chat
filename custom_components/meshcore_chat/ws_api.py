@@ -1347,14 +1347,12 @@ async def ws_execute_remote(hass, connection, msg):
             )
             return
 
-        # Send login if password is available
+        # Send login if password is available. send_login_sync blocks
+        # until the node confirms login (LOGIN_SUCCESS) or the request
+        # times out, so the empirical sleep is no longer needed. The
+        # return value is intentionally not inspected here (see Phase 2).
         if password:
-            await coordinator.api.mesh_core.commands.send_login(contact, password)
-            # Wait a moment for login to be processed before issuing the
-            # command. The 0.5s is empirical, mirroring the upstream
-            # meshcore integration's services.py — replace with an event-
-            # driven wait when the SDK exposes a login-complete signal.
-            await asyncio.sleep(0.5)
+            await coordinator.api.mesh_core.commands.send_login_sync(contact, password)
 
         # Send the command
         cmd_result = await coordinator.api.mesh_core.commands.send_cmd(
@@ -1606,10 +1604,12 @@ async def ws_remove_neighbor(hass, connection, msg):
             )
             return
 
-        # Send login if password is available
+        # Send login if password is available. send_login_sync blocks
+        # until the node confirms login (LOGIN_SUCCESS) or the request
+        # times out, so the empirical sleep is no longer needed. The
+        # return value is intentionally not inspected here (see Phase 2).
         if password:
-            await coordinator.api.mesh_core.commands.send_login(contact, password)
-            await asyncio.sleep(0.5)
+            await coordinator.api.mesh_core.commands.send_login_sync(contact, password)
 
         # Send neighbor.remove command to the repeater
         cmd_result = await coordinator.api.mesh_core.commands.send_cmd(
