@@ -6,6 +6,14 @@ import { LOCAL_COMMANDS } from '../commands/local-commands';
 import { REMOTE_COMMANDS } from '../commands/remote-commands';
 import { panelStyles } from '../styles';
 import { attachDialogA11y } from '../utils/dialog-a11y';
+import {
+  ENUMS,
+  AUTOADD_BITS,
+  decodeEnum,
+  decodeBitmask,
+  num,
+  type DecodedBitmask,
+} from '../firmware-vocabulary';
 
 /**
  * Command dialog for issuing local or remote commands to MeshCore devices
@@ -209,6 +217,7 @@ export class CommandDialog extends LitElement {
 
   private _renderParamInput(param: CommandParam) {
     const value = this._paramValues[param.name] ?? param.default ?? '';
+    const label = param.label ?? param.name;
 
     switch (param.type) {
       case 'boolean':
@@ -222,32 +231,75 @@ export class CommandDialog extends LitElement {
                   this._paramValues[param.name] = (e.target as HTMLInputElement).checked;
                 }}
               />
-              <span class="form-toggle-label">${param.name}</span>
+              <span class="form-toggle-label">${label}</span>
             </label>
             ${param.description ? html`<div class="form-description">${param.description}</div>` : ''}
           </div>
         `;
 
-      case 'select':
+      case 'select': {
+        // Prefer structured selectOptions (label/value separable, value type
+        // preserved); fall back to the legacy string[] options. The change
+        // handler stores the option's typed value — NOT the raw DOM string —
+        // so a numeric enum reaches a local SDK command as a number, not "1".
+        const opts = param.selectOptions
+          ? param.selectOptions
+          : (param.options || []).map((o) => ({ label: o, value: o }));
         return html`
           <div class="form-group">
-            <label class="form-label">${param.name}</label>
+            <label class="form-label">${label}</label>
             <select
               class="form-select"
               @change=${(e: Event) => {
-                this._paramValues[param.name] = (e.target as HTMLSelectElement).value;
+                const domVal = (e.target as HTMLSelectElement).value;
+                const match = opts.find((o) => String(o.value) === domVal);
+                this._paramValues[param.name] = match ? match.value : domVal;
               }}>
-              <option value="" ?selected=${!value}>-- Select --</option>
-              ${(param.options || []).map((opt) => html`<option value=${opt} ?selected=${String(value) === String(opt)}>${opt}</option>`)}
+              <option value="" ?selected=${value === '' || value === undefined}>-- Select --</option>
+              ${opts.map((opt) => html`<option value=${String(opt.value)} ?selected=${String(value) === String(opt.value)}>${opt.label}</option>`)}
             </select>
             ${param.description ? html`<div class="form-description">${param.description}</div>` : ''}
           </div>
         `;
+      }
+
+      case 'bitmask': {
+        // One checkbox per bit; the submitted value is the OR of selected bit
+        // values as a number (matching the firmware wire format). requestUpdate
+        // is needed because _paramValues is a @state object mutated in place —
+        // Lit change-detects on reference identity, so the checkbox-checked and
+        // running-Value displays won't refresh without it.
+        return html`
+          <fieldset class="form-group">
+            <legend class="form-label">${label}</legend>
+            ${(param.bits || []).map((bit) => {
+              const current = Number(this._paramValues[param.name] ?? param.default ?? 0);
+              return html`
+                <label class="form-toggle">
+                  <input
+                    type="checkbox"
+                    ?checked=${(current & bit.value) === bit.value}
+                    @change=${(e: Event) => {
+                      const on = (e.target as HTMLInputElement).checked;
+                      const prev = Number(this._paramValues[param.name] ?? param.default ?? 0);
+                      this._paramValues[param.name] = on ? prev | bit.value : prev & ~bit.value;
+                      this.requestUpdate();
+                    }}
+                  />
+                  <span class="form-toggle-label">${bit.label}</span>
+                </label>
+              `;
+            })}
+            <div class="form-description">Value: ${Number(this._paramValues[param.name] ?? param.default ?? 0)}</div>
+            ${param.description ? html`<div class="form-description">${param.description}</div>` : ''}
+          </fieldset>
+        `;
+      }
 
       case 'number':
         return html`
           <div class="form-group">
-            <label class="form-label">${param.name}</label>
+            <label class="form-label">${label}</label>
             <input
               type="number"
               class="form-input"
@@ -268,7 +320,7 @@ export class CommandDialog extends LitElement {
       default:
         return html`
           <div class="form-group">
-            <label class="form-label">${param.name}</label>
+            <label class="form-label">${label}</label>
             <input
               type="text"
               class="form-input"
@@ -312,12 +364,67 @@ export class CommandDialog extends LitElement {
     percentage: 'Battery (%)',
     uptime: 'Uptime (s)',
     temperature: 'Temperature',
+    max_hops: 'Max Hops (0 = unlimited)',
+    config: 'Auto-Add Config',
+  };
+
+  // Value decoders for known response keys, parallel to _FRIENDLY_LABELS (which
+  // only translates keys). A formatter returns either a display string or a
+  // DecodedBitmask object (rendered as a checkmark sub-list). Keys without a
+  // formatter fall back to _formatValue, so unmapped keys render as today.
+  //
+  // Latitude/longitude are NOT rescaled here — the SDK already divides by 1e6,
+  // so the value arrives in decimal degrees (likewise radio freq/bw arrive in
+  // MHz/kHz). Every numeric formatter routes through num() so a malformed or
+  // partial frame renders a visible raw fallback rather than NaN or
+  // all-flags-false.
+  private static _VALUE_FORMATTERS: Record<string, (raw: unknown) => string | DecodedBitmask> = {
+    adv_loc_policy: (v) => decodeEnum(v, ENUMS.LOC_POLICY),
+    path_hash_mode: (v) => decodeEnum(v, ENUMS.PATH_HASH_MODE),
+    telemetry_mode_env: (v) => decodeEnum(v, ENUMS.TELEMETRY_MODE),
+    telemetry_mode_loc: (v) => decodeEnum(v, ENUMS.TELEMETRY_MODE),
+    telemetry_mode_base: (v) => decodeEnum(v, ENUMS.TELEMETRY_MODE),
+    // SDK emits this as a boolean (reader.py: `dbuf.read(1)[0] > 0`).
+    manual_add_contacts: (v) => {
+      if (v === true) return 'Manual Mode';
+      if (v === false) return 'Auto-Add Enabled';
+      const n = num(v);
+      if (n === undefined) return `Unknown (${v})`;
+      return n ? 'Manual Mode' : 'Auto-Add Enabled';
+    },
+    multi_acks: (v) => {
+      const n = num(v);
+      return n === undefined ? `Unknown (${v})` : n ? 'Yes' : 'No';
+    },
+    // Already decimal degrees from the SDK — append the unit, do not rescale.
+    adv_lat: (v) => {
+      const n = num(v);
+      return n === undefined ? `${v}` : `${n.toFixed(6)}°`;
+    },
+    adv_lon: (v) => {
+      const n = num(v);
+      return n === undefined ? `${v}` : `${n.toFixed(6)}°`;
+    },
+    // Auto-add config bitmask → checkmark sub-list of named flags.
+    config: (v) => {
+      const n = num(v);
+      return n === undefined ? `Unknown (${v})` : decodeBitmask(n, AUTOADD_BITS);
+    },
   };
 
   private _formatValue(value: unknown): string {
     if (value === true) return 'Yes';
     if (value === false) return 'No';
     if (value === null || value === undefined) return '—';
+    if (typeof value === 'object') {
+      // Nested object/array (e.g. telemetry LPP payload, frequency ranges):
+      // render compact JSON rather than the useless "[object Object]".
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }
     if (typeof value === 'string' && value.length > 20) {
       // Truncate long hex strings with ellipsis but show full on hover
       return String(value);
@@ -336,7 +443,20 @@ export class CommandDialog extends LitElement {
             <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px;">
               ${entries.map(([key, value]) => {
                 const label = CommandDialog._FRIENDLY_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-                const displayVal = this._formatValue(value);
+                const formatter = CommandDialog._VALUE_FORMATTERS[key];
+                const formatted = formatter ? formatter(value) : undefined;
+                if (formatted && typeof formatted === 'object') {
+                  // DecodedBitmask → a header row spanning both columns, then one
+                  // grid row per flag (name left, ✓/✗ right) so it matches the
+                  // label-then-value layout of every other response row.
+                  return html`
+                    <div style="grid-column: 1 / -1; color: var(--secondary-text-color);">${label}</div>
+                    ${Object.entries(formatted).map(([flag, on]) => html`
+                      <div style="padding-left: 12px; white-space: nowrap;">${flag}</div>
+                      <div style="font-family: var(--code-font-family, monospace);">${on ? '✓' : '✗'}</div>`)}
+                  `;
+                }
+                const displayVal = formatted !== undefined ? String(formatted) : this._formatValue(value);
                 const isLong = typeof value === 'string' && value.length > 24;
                 return html`
                   <div style="color: var(--secondary-text-color); white-space: nowrap;">${label}</div>
@@ -353,14 +473,24 @@ export class CommandDialog extends LitElement {
     } catch {
       // Not JSON — fall through to plain text
     }
-    return response;
+    // Plain text (e.g. remote CLI output): wrap in an explicit pre-wrap span so
+    // newlines/spacing survive — the container itself is white-space: normal so
+    // the structured/grid path doesn't render template indentation as blanks.
+    return html`<span style="white-space: pre-wrap;">${response}</span>`;
   }
 
   private _onCommandSelected(e: Event) {
     const name = (e.target as HTMLSelectElement).value;
     const commands = this._getCommands();
     this._selectedCommand = commands.find((c) => c.name === name) || null;
-    this._paramValues = {};
+    // Seed declared defaults so a param the user never interacts with (e.g. an
+    // unchecked boolean whose intended state is its default) still submits its
+    // value, rather than being omitted from the args dict.
+    const seeded: Record<string, unknown> = {};
+    for (const p of this._selectedCommand?.params ?? []) {
+      if (p.default !== undefined) seeded[p.name] = p.default;
+    }
+    this._paramValues = seeded;
     this._response = null;
     this._error = null;
   }

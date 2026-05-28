@@ -1204,6 +1204,17 @@ async def ws_set_device_config(hass, connection, msg):
         )
 
 
+def _json_safe(obj):
+    """json.dumps ``default=`` hook: render bytes as hex (mirroring the
+    integration's execute_command service) and fall back to str() for any other
+    non-JSON-serializable value, so one odd field can't fail the whole response.
+    Without this, a CHANNEL_INFO payload (whose channel_secret is raw 16-byte
+    bytes) raises TypeError and the command surfaces as an opaque error."""
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.hex()
+    return str(obj)
+
+
 def _format_event_response(result) -> str:
     """Extract a user-friendly response string from an Event or raw value."""
     if result is None:
@@ -1222,7 +1233,7 @@ def _format_event_response(result) -> str:
         return "Command sent"
 
     if isinstance(payload, dict):
-        return json.dumps(payload)
+        return json.dumps(payload, default=_json_safe)
     return str(payload)
 
 
