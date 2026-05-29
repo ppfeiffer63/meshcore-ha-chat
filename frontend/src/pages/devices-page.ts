@@ -725,6 +725,7 @@ export class DevicesPage extends LitElement {
         .hass=${this.hass}
         .entryId=${this.config?.entry_id}
         .targetPrefix=${this._commandDialogTarget}
+        .nodeName=${this.config?.node_name ?? ''}
         ?isLocal=${this._commandDialogIsLocal}
         ?narrow=${this.narrow}
         @close=${this._onCommandDialogClose}>

@@ -1,6 +1,6 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { HomeAssistant, CommandDef, CommandParam } from '../types';
+import type { HomeAssistant, CommandDef, CommandParam, HassEvent } from '../types';
 import { executeLocal, executeRemote } from '../api';
 import { LOCAL_COMMANDS } from '../commands/local-commands';
 import { REMOTE_COMMANDS } from '../commands/remote-commands';
@@ -29,6 +29,9 @@ export class CommandDialog extends LitElement {
   @property({ type: String }) targetPrefix?: string;
   @property({ type: Boolean }) isLocal = false;
   @property({ type: Boolean }) narrow = false;
+  /** Companion node name — used to suppress the outgoing echo in the
+   *  device response feed (only meaningful when isLocal is false). */
+  @property({ type: String }) nodeName = '';
 
   constructor() {
     super();
@@ -44,6 +47,13 @@ export class CommandDialog extends LitElement {
   @state() private _response: string | null = null;
   @state() private _executing = false;
   @state() private _error: string | null = null;
+
+  // Live device-response feed (remote dialogs only). Replies arrive over the
+  // mesh as ordinary meshcore_message events while the dialog is open.
+  @state() private _deviceResponses: Array<{ text: string; sender: string; ts: number; snr?: number }> = [];
+  private _unsubMsg: (() => void) | null = null;
+  private _feedActive = false;
+  private _feedSince = 0;
 
   private _getCommands(): CommandDef[] {
     return this.isLocal ? LOCAL_COMMANDS : REMOTE_COMMANDS;
@@ -94,6 +104,32 @@ export class CommandDialog extends LitElement {
       .danger-warning-icon {
         font-size: 16px;
         flex-shrink: 0;
+      }
+
+      .device-response-feed {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-height: 180px;
+        overflow-y: auto;
+        font-family: var(--code-font-family, monospace);
+        font-size: 12px;
+      }
+
+      .device-response-row {
+        padding: 4px 8px;
+        background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+        border-radius: 4px;
+        word-break: break-word;
+      }
+
+      .drr-time,
+      .drr-snr {
+        color: var(--secondary-text-color);
+      }
+
+      .drr-time {
+        margin-right: 6px;
       }
     `,
   ];
@@ -200,6 +236,24 @@ export class CommandDialog extends LitElement {
                         </div>
                       `
                     : ''}
+                `
+              : ''}
+
+            <!-- Live Device Response Feed (remote dialogs only) -->
+            ${!this.isLocal && this._deviceResponses.length > 0
+              ? html`
+                  <div class="form-group" style="margin-top: 16px;">
+                    <label class="form-label">Responses from device</label>
+                    <div class="device-response-feed">
+                      ${this._deviceResponses.map(
+                        (r) => html`<div class="device-response-row">
+                          <span class="drr-time">${new Date(r.ts).toLocaleTimeString()}</span><span class="drr-text">${r.text}</span>${r.snr !== undefined
+                            ? html`<span class="drr-snr"> · SNR ${r.snr}</span>`
+                            : ''}
+                        </div>`,
+                      )}
+                    </div>
+                  </div>
                 `
               : ''}
           </div>
@@ -539,6 +593,81 @@ export class CommandDialog extends LitElement {
     }
   }
 
+  updated(changed: Map<string, unknown>) {
+    if (changed.has('open') || changed.has('targetPrefix') || changed.has('isLocal')) {
+      // Restart the feed on any relevant change: stop the old subscription,
+      // then (re)subscribe if the dialog is open against a remote device.
+      this._stopResponseFeed();
+      if (this.open && !this.isLocal) {
+        this._startResponseFeed();
+      }
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._stopResponseFeed();
+  }
+
+  /** Subscribe to incoming meshcore_message events while a remote device
+   *  dialog is open and show the device's replies as a live feed. Mesh
+   *  replies are ordinary inbound messages with no protocol-level
+   *  request/response correlation, so this surfaces "responses from the
+   *  device since the command was issued," not a guaranteed reply to a
+   *  specific command. */
+  private async _startResponseFeed() {
+    if (this._feedActive || this.isLocal || !this.open || !this.hass?.connection) return;
+    this._feedActive = true;
+    this._feedSince = Date.now();
+    // Avoid a redundant reactive write (and the resulting extra update cycle)
+    // when the feed is already empty — assigning a fresh [] always differs by
+    // reference and would otherwise re-trigger updated().
+    if (this._deviceResponses.length) this._deviceResponses = [];
+    try {
+      const unsub = await this.hass.connection.subscribeEvents((event: HassEvent) => {
+        const d = event.data;
+        if (!this._prefixMatches(d.pubkey_prefix as string | undefined)) return;
+        if ((d.sender_name as string) === this.nodeName) return; // skip outgoing echo
+        const ts = Date.parse((d.timestamp as string) ?? '') || Date.now();
+        if (ts < this._feedSince - 1000) return; // ignore pre-open history
+        this._deviceResponses = [
+          ...this._deviceResponses,
+          {
+            text: (d.message as string) ?? '',
+            sender: (d.sender_name as string) ?? '',
+            ts,
+            snr: typeof d.snr === 'number' ? (d.snr as number) : undefined,
+          },
+        ];
+      }, 'meshcore_message');
+      // The dialog may have closed while subscribeEvents was awaiting.
+      if (!this.open || this.isLocal) {
+        unsub();
+        this._feedActive = false;
+        return;
+      }
+      this._unsubMsg = unsub;
+    } catch {
+      this._feedActive = false;
+    }
+  }
+
+  private _stopResponseFeed() {
+    if (this._unsubMsg) {
+      this._unsubMsg();
+      this._unsubMsg = null;
+    }
+    this._feedActive = false;
+  }
+
+  /** Compare the event's sender pubkey_prefix against the dialog target on a
+   *  common width (<=12 hex), case-insensitive. */
+  private _prefixMatches(eventPrefix?: string): boolean {
+    if (!eventPrefix || !this.targetPrefix) return false;
+    const n = Math.min(eventPrefix.length, this.targetPrefix.length, 12);
+    return eventPrefix.slice(0, n).toLowerCase() === this.targetPrefix.slice(0, n).toLowerCase();
+  }
+
   private _onOverlayClick(e: Event) {
     if (e.target === e.currentTarget) {
       this._onClose();
@@ -550,6 +679,8 @@ export class CommandDialog extends LitElement {
     this._paramValues = {};
     this._response = null;
     this._error = null;
+    this._stopResponseFeed();
+    this._deviceResponses = [];
     this.dispatchEvent(new CustomEvent('close', { bubbles: true }));
   }
 }
