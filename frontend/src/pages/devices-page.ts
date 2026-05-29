@@ -931,8 +931,6 @@ export class DevicesPage extends LitElement {
         <div class="actions-row">
           <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeRemoteAction(device, 'advert')}>Flood Advert</button>
           <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeRemoteAction(device, 'clock sync')}>Sync Clock</button>
-          <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeRemoteAction(device, 'get bat')}>Req Telemetry</button>
-          <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeRemoteAction(device, 'get uptime')}>Req Status</button>
         </div>
       </div>
     `;
