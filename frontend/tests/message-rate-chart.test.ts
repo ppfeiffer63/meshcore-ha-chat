@@ -25,24 +25,29 @@ describe('message-rate-chart', () => {
     expect(el.shadowRoot?.querySelector('.chart-container')).toBeNull();
   });
 
-  it('draws an svg + the three-series legend when given data', async () => {
+  it('draws an svg + the five-series legend when given data', async () => {
     const now = Date.now();
     el = await mount([
-      { timestamp: now - 3_600_000, values: { sent: 1.2, recv: 3.4, errors: 0.1 } },
-      { timestamp: now, values: { sent: 0.8, recv: 2.1, errors: 0 } },
+      { timestamp: now - 3_600_000, values: { sent_flood: 1.2, sent_direct: 0.3, recv_flood: 3.4, recv_direct: 0.5, errors: 0.1 } },
+      { timestamp: now, values: { sent_flood: 0.8, sent_direct: 0.2, recv_flood: 2.1, recv_direct: 0.4, errors: 0 } },
     ]);
     expect(el.shadowRoot?.querySelector('svg')).toBeTruthy();
     const text = el.shadowRoot?.textContent ?? '';
-    expect(text).toContain('Sent');
-    expect(text).toContain('Received');
+    expect(text).toContain('Sent · Flood');
+    expect(text).toContain('Sent · Direct');
+    expect(text).toContain('Recv · Flood');
+    expect(text).toContain('Recv · Direct');
     expect(text).toContain('Errors');
     expect(text).toContain('msg/min');
-    const polylines = el.shadowRoot?.querySelectorAll('polyline') ?? [];
-    expect(polylines.length).toBeGreaterThanOrEqual(2);
+    const polylines = Array.from(el.shadowRoot?.querySelectorAll('polyline') ?? []);
+    expect(polylines.length).toBeGreaterThanOrEqual(5);
+    // The two "direct" series render dashed.
+    const dashed = polylines.filter((p) => (p.getAttribute('stroke-dasharray') ?? 'none') !== 'none');
+    expect(dashed.length).toBeGreaterThanOrEqual(2);
   });
 
   it('renders a single datapoint as a dot rather than a line', async () => {
-    el = await mount([{ timestamp: Date.now(), values: { sent: 5, recv: 0, errors: 0 } }]);
+    el = await mount([{ timestamp: Date.now(), values: { sent_flood: 5, recv_flood: 0, errors: 0 } }]);
     expect(el.shadowRoot?.querySelector('circle')).toBeTruthy();
   });
 });

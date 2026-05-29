@@ -7,10 +7,15 @@ export interface RatePoint {
   values: Record<string, number>;
 }
 
-const SERIES: Array<{ key: string; label: string; color: string }> = [
-  { key: 'sent', label: 'Sent', color: 'var(--info, #2196f3)' },
-  { key: 'recv', label: 'Received', color: 'var(--good, #4caf50)' },
-  { key: 'errors', label: 'Errors', color: 'var(--bad, #f44336)' },
+// Five series. Colour groups the family (Sent = blue, Received = green,
+// Errors = red); line style distinguishes route within a family
+// (Flood = solid, Direct = dashed).
+const SERIES: Array<{ key: string; label: string; color: string; dash: boolean }> = [
+  { key: 'sent_flood',  label: 'Sent · Flood',  color: 'var(--info, #2196f3)', dash: false },
+  { key: 'sent_direct', label: 'Sent · Direct', color: 'var(--info, #2196f3)', dash: true },
+  { key: 'recv_flood',  label: 'Recv · Flood',  color: 'var(--good, #4caf50)', dash: false },
+  { key: 'recv_direct', label: 'Recv · Direct', color: 'var(--good, #4caf50)', dash: true },
+  { key: 'errors',      label: 'Errors',        color: 'var(--bad, #f44336)',  dash: false },
 ];
 
 /**
@@ -50,7 +55,14 @@ export class MessageRateChart extends LitElement {
       font-size: 11px;
       color: var(--secondary-text-color);
     }
-    .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .legend-line {
+      display: inline-block;
+      width: 16px;
+      height: 0;
+      border-top: 2px solid;
+      flex-shrink: 0;
+    }
+    .legend-line.dashed { border-top-style: dashed; }
   `;
 
   render() {
@@ -61,7 +73,8 @@ export class MessageRateChart extends LitElement {
         <div class="legend">
           ${SERIES.map(
             (s) => html`<div class="legend-item">
-              <span class="legend-dot" style="background:${s.color}"></span>${s.label}
+              <span class="legend-line ${s.dash ? 'dashed' : ''}"
+                    style="border-top-color:${s.color}"></span>${s.label}
             </div>`,
           )}
         </div>
@@ -120,7 +133,8 @@ export class MessageRateChart extends LitElement {
         return svg`<circle cx="${x}" cy="${y}" r="2" fill="${s.color}" />`;
       }
       return svg`<polyline points="${pts.join(' ')}" fill="none" stroke="${s.color}"
-        stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />`;
+        stroke-width="1.5" stroke-dasharray="${s.dash ? '5,3' : 'none'}"
+        stroke-linecap="round" stroke-linejoin="round" />`;
     });
 
     return svg`

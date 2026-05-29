@@ -430,13 +430,20 @@ export class NodeSummary extends LitElement {
 
   private async _fetchRateHistory(): Promise<void> {
     if (!this.hass) return;
-    const nbSent = this._findEntityIdMatching('nb_sent');
-    const nbRecv = this._findEntityIdMatching('nb_recv');
-    const recvErr = this._findEntityIdMatching('recv_errors');
+    // Five series: sent + received split into flood/direct, plus errors.
+    // Each maps a totals entity to its `_rate` sibling statistic.
+    const wanted: Array<[string, string]> = [
+      ['sent_flood', 'sent_flood'],
+      ['sent_direct', 'sent_direct'],
+      ['recv_flood', 'recv_flood'],
+      ['recv_direct', 'recv_direct'],
+      ['errors', 'recv_errors'],
+    ];
     const series: Array<[string, string]> = [];
-    if (nbSent) series.push(['sent', this._deriveRateId(nbSent.entity_id, 'nb_sent')]);
-    if (nbRecv) series.push(['recv', this._deriveRateId(nbRecv.entity_id, 'nb_recv')]);
-    if (recvErr) series.push(['errors', this._deriveRateId(recvErr.entity_id, 'recv_errors')]);
+    for (const [seriesKey, totalsKey] of wanted) {
+      const info = this._findEntityIdMatching(totalsKey);
+      if (info) series.push([seriesKey, this._deriveRateId(info.entity_id, totalsKey)]);
+    }
     if (series.length === 0) { this._rateHistory = []; return; }
 
     try {
