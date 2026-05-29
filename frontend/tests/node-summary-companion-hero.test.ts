@@ -165,11 +165,29 @@ describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
     expect(text).toMatch(/TX 0\.0%/);
   });
 
-  it('annotates the Messages Received tile with the RX-error rate', () => {
+  it('surfaces recv_errors as a "+N err" legend item and a red error line', () => {
     // recv_errors 638 / (nb_recv 3272 + 638) = 16.3%.
-    const text = el.shadowRoot?.textContent ?? '';
-    expect(text).toMatch(/638\s+receive errors/);
-    expect(text).toMatch(/16\.3% of RX/);
+    const errLine = el.shadowRoot?.querySelector('.err-line') as HTMLElement | null;
+    expect(errLine).toBeTruthy();
+    const title = errLine?.getAttribute('title') ?? '';
+    expect(title).toContain('638');
+    expect(title).toContain('16.3% of RX');
+    // The "+638 err" legend rides on the Received tile's stacked-bar
+    // (its own shadow DOM, so read the property rather than textContent).
+    const bars = Array.from(
+      el.shadowRoot?.querySelectorAll('meshcore-stacked-bar') ?? [],
+    ) as Array<{ extraLegendText?: string }>;
+    const errBar = bars.find((b) => (b.extraLegendText ?? '').includes('err'));
+    expect(errBar?.extraLegendText).toContain('+638 err');
+  });
+
+  it('no longer shows the per-tile msg/min rate text', () => {
+    const bars = Array.from(
+      el.shadowRoot?.querySelectorAll('meshcore-stacked-bar') ?? [],
+    ) as Array<{ extraLegendText?: string }>;
+    for (const b of bars) {
+      expect(b.extraLegendText ?? '').not.toContain('msg/min');
+    }
   });
 
   it('populates the SENSORS table with the remaining diagnostics', () => {

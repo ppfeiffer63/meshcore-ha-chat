@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 import type { HomeAssistant, ManagedDevice } from '../types';
 import type { EntityInfo } from '../utils/classify-entity';
 import {
@@ -12,7 +12,9 @@ import { longPress } from '../directives/long-press';
 import './stat-bar';
 import './stacked-bar';
 import './info-tip';
+import './message-rate-chart';
 import type { StackedBarSegment } from './stacked-bar';
+import type { RatePoint } from './message-rate-chart';
 
 /**
  * Synthesized device descriptor for the Settings tab's companion device.
@@ -80,6 +82,13 @@ export class NodeSummary extends LitElement {
    *  Contact.last_advert). Used for the "Updated X ago" line beneath
    *  the coordinates in the Location hero tile. */
   @property({ type: Number }) fallbackUpdated?: number;
+
+  /** 48h message-rate history (msg/min) for the activity chart, fetched from
+   *  recorder statistics for the node's *_rate sensors. */
+  @state() private _rateHistory: RatePoint[] = [];
+  /** Guard: the nb_sent entity_id the current _rateHistory was fetched for,
+   *  so we fetch once per device rather than on every hass state push. */
+  private _rateHistoryKey: string | null = null;
 
   static styles = css`
     :host { display: block; }
@@ -298,8 +307,21 @@ export class NodeSummary extends LitElement {
       color: var(--primary-text-color);
       font-style: normal;
     }
-    .dup-annotation.err { cursor: pointer; }
-    .dup-annotation.err .num { color: var(--warning, #ff9800); }
+    /* Thin red line beneath the Messages Received composition bar showing
+       the lifetime receive-error share. */
+    .err-line {
+      height: 3px;
+      width: 100%;
+      margin-top: 3px;
+      background: var(--divider-color, #e0e0e0);
+      border-radius: 2px;
+      overflow: hidden;
+      cursor: help;
+    }
+    .err-line-fill {
+      height: 100%;
+      background: var(--bad, #f44336);
+    }
   `;
 
   // ─── Render ────────────────────────────────────────────────────────────
@@ -321,6 +343,8 @@ export class NodeSummary extends LitElement {
         ${heroTiles}
       </div>
 
+      ${this._renderMessageActivityCard()}
+
       ${groups.length > 0
         ? html`
           <div class="subsection-label">
@@ -335,6 +359,77 @@ export class NodeSummary extends LitElement {
             </tbody>
           </table>`
         : nothing}
+    `;
+  }
+
+  // ─── Message activity (48h rate history) ──────────────────────────────
+
+  /** Fetch once per device when entities/hass become available. The hass
+   *  object identity changes on every state push, so guard on the nb_sent
+   *  entity_id to avoid refetching on every update. */
+  updated(changed: Map<string, unknown>) {
+    if (!this.hass || !this.device) return;
+    if (!changed.has('hass') && !changed.has('device') && !changed.has('entities')) return;
+    const nbSent = this._findEntityIdMatching('nb_sent');
+    const key = nbSent?.entity_id ?? null;
+    if (key && key !== this._rateHistoryKey) {
+      this._rateHistoryKey = key;
+      void this._fetchRateHistory();
+    } else if (!key && this._rateHistoryKey !== null) {
+      this._rateHistoryKey = null;
+      this._rateHistory = [];
+    }
+  }
+
+  /** Derive a `_rate` sibling entity_id from a totals entity_id. The rate
+   *  sensors are excluded from `entities` by classify-entity but follow the
+   *  fixed `..._<key>_rate_<suffix>` pattern (mirrors _readDerivedRate). */
+  private _deriveRateId(totalsEid: string, key: string): string {
+    return totalsEid.replace(`_${key}_`, `_${key}_rate_`);
+  }
+
+  private async _fetchRateHistory(): Promise<void> {
+    if (!this.hass) return;
+    const nbSent = this._findEntityIdMatching('nb_sent');
+    const nbRecv = this._findEntityIdMatching('nb_recv');
+    const recvErr = this._findEntityIdMatching('recv_errors');
+    const series: Array<[string, string]> = [];
+    if (nbSent) series.push(['sent', this._deriveRateId(nbSent.entity_id, 'nb_sent')]);
+    if (nbRecv) series.push(['recv', this._deriveRateId(nbRecv.entity_id, 'nb_recv')]);
+    if (recvErr) series.push(['errors', this._deriveRateId(recvErr.entity_id, 'recv_errors')]);
+    if (series.length === 0) { this._rateHistory = []; return; }
+
+    try {
+      const stats = await this.hass.callWS<Record<string, Array<{ start?: string; mean?: number }>>>({
+        type: 'recorder/statistics_during_period',
+        start_time: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+        end_time: new Date().toISOString(),
+        statistic_ids: series.map(([, id]) => id),
+        period: 'hour',
+      });
+      const byTs: Record<number, Record<string, number>> = {};
+      for (const [seriesKey, statId] of series) {
+        const pts = stats[statId];
+        if (!Array.isArray(pts)) continue;
+        for (const p of pts) {
+          if (p.start == null || p.mean == null) continue;
+          const ts = new Date(p.start).getTime();
+          (byTs[ts] ??= {})[seriesKey] = p.mean;
+        }
+      }
+      this._rateHistory = Object.entries(byTs)
+        .map(([ts, values]) => ({ timestamp: parseInt(ts, 10), values }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+    } catch {
+      this._rateHistory = [];
+    }
+  }
+
+  private _renderMessageActivityCard() {
+    if (!this._rateHistory.length) return nothing;
+    return html`
+      <div class="subsection-label">Message activity (48h)</div>
+      <meshcore-message-rate-chart .data=${this._rateHistory}></meshcore-message-rate-chart>
     `;
   }
 
@@ -549,11 +644,6 @@ export class NodeSummary extends LitElement {
       { value: direct, label: `Direct ${direct}`, kind: 'direct' },
       { value: other,  label: `Other ${other}`,   kind: 'other' },
     ];
-    const sentRate = this._readDerivedRate(nbSent.entity_id, 'nb_sent');
-    const rateText = Number.isFinite(sentRate)
-      ? `${sentRate.toFixed(1)} msg/min`
-      : undefined;
-
     consumed.add(nbSent.entity_id);
     if (sentFlood) consumed.add(sentFlood.entity_id);
     if (sentDirect) consumed.add(sentDirect.entity_id);
@@ -581,8 +671,7 @@ export class NodeSummary extends LitElement {
         </div>
         <meshcore-stacked-bar
           .segments=${segs}
-          .legend=${'inline'}
-          .extraLegendText=${rateText ?? ''}>
+          .legend=${'inline'}>
         </meshcore-stacked-bar>
       </div>
     `;
@@ -613,26 +702,18 @@ export class NodeSummary extends LitElement {
     const dupRatio = totalRecv > 0 ? (totalDups / totalRecv) * 100 : 0;
     // Dup ratio is informational only -- no banding (see iter14 commit).
 
-    const recvRate = this._readDerivedRate(nbRecv.entity_id, 'nb_recv');
-    const rateText = Number.isFinite(recvRate)
-      ? `${recvRate.toFixed(1)} msg/min`
-      : undefined;
-
     consumed.add(nbRecv.entity_id);
     if (recvFlood) consumed.add(recvFlood.entity_id);
     if (recvDirect) consumed.add(recvDirect.entity_id);
     if (floodDups) consumed.add(floodDups.entity_id);
     if (directDups) consumed.add(directDups.entity_id);
 
-    // Companion nodes expose a recv_errors counter (STATS_PACKETS). Surface
-    // it as an RX-error annotation here -- count plus error rate as a
-    // fraction of all received-frame attempts (good frames + errors) -- and
-    // consume the entity so it doesn't also render as a table row. Gated to
-    // companion so managed-repeater hero rendering is unchanged.
-    const isCompanion = this.device?.type === 'companion';
-    const recvErrorsInfo = isCompanion
-      ? this._findEntityIdMatching('recv_errors')
-      : undefined;
+    // recv_errors (STATS_PACKETS counter): surface as a thin red line below
+    // the composition bar plus a "+N err" legend item where the msg/min rate
+    // used to sit -- not a separate table row. Applies to any node that
+    // reports it (companion + managed repeater). Lifetime error share =
+    // recv_errors / (recv_errors + nb_recv).
+    const recvErrorsInfo = this._findEntityIdMatching('recv_errors');
     const recvErrorsRaw = recvErrorsInfo
       ? this._readNumber(recvErrorsInfo.entity_id)
       : NaN;
@@ -640,6 +721,7 @@ export class NodeSummary extends LitElement {
     const errDenom = totalRecv + recvErrorsN;
     const errRatio = errDenom > 0 ? (recvErrorsN / errDenom) * 100 : 0;
     if (recvErrorsInfo) consumed.add(recvErrorsInfo.entity_id);
+    const errLegend = recvErrorsN > 0 ? `+${this._formatCount(recvErrorsN)} err` : undefined;
 
     return html`
       <div class="hero-tile" @click=${() => this._fireMoreInfo(nbRecv.entity_id)}>
@@ -672,24 +754,19 @@ export class NodeSummary extends LitElement {
         <meshcore-stacked-bar
           .segments=${segs}
           .legend=${'inline'}
-          .extraLegendText=${rateText ?? ''}>
+          .extraLegendText=${errLegend ?? ''}>
         </meshcore-stacked-bar>
+        ${recvErrorsN > 0
+          ? html`<div class="err-line"
+                      title="Receive errors: ${recvErrorsN} (${errRatio.toFixed(1)}% of RX attempts)">
+              <div class="err-line-fill" style="width:${Math.min(100, errRatio).toFixed(1)}%"></div>
+            </div>`
+          : nothing}
         ${totalDups > 0
           ? html`<div class="dup-annotation">
               + <span class="num">${totalDups}</span>
               duplicate${totalDups === 1 ? '' : 's'}
               (${dupRatio.toFixed(1)}% of recv)
-            </div>`
-          : nothing}
-        ${recvErrorsInfo && recvErrorsN > 0
-          ? html`<div class="dup-annotation err"
-                      @click=${(e: Event) => {
-                        e.stopPropagation();
-                        this._fireMoreInfo(recvErrorsInfo.entity_id);
-                      }}>
-              + <span class="num">${recvErrorsN}</span>
-              receive error${recvErrorsN === 1 ? '' : 's'}
-              (${errRatio.toFixed(1)}% of RX)
             </div>`
           : nothing}
       </div>
@@ -1169,20 +1246,9 @@ export class NodeSummary extends LitElement {
     return evaluateSensor(key, raw);
   }
 
-  /** Read a *_rate sensor's state directly from hass.states (rate sensors
-   *  are excluded from `this.entities` by classify-entity, so we derive
-   *  the rate entity_id from the totals entity_id by inserting `_rate`
-   *  before the device-name suffix). Returns NaN if not present. */
-  private _readDerivedRate(totalsEid: string, key: string): number {
-    // entity_id pattern: sensor.meshcore_<prefix>_<key>_<device-suffix>
-    // rate variant:     sensor.meshcore_<prefix>_<key>_rate_<device-suffix>
-    const rateEid = totalsEid.replace(`_${key}_`, `_${key}_rate_`);
-    if (!this.hass?.states[rateEid]) return NaN;
-    const s = this.hass.states[rateEid].state;
-    if (s === 'unavailable' || s === 'unknown') return NaN;
-    const n = parseFloat(s);
-    return Number.isFinite(n) ? n : NaN;
-  }
+  // _readDerivedRate removed: the per-tile msg/min text is gone (rates now
+  // live in the 48h Message activity chart, which reads recorder statistics
+  // for the *_rate sensors via _fetchRateHistory / _deriveRateId).
 
   // Traffic composite logic moved to the hero tile renderers
   // (_renderMessagesSentTile / _renderMessagesReceivedTile /
