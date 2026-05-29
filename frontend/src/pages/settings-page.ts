@@ -973,7 +973,6 @@ export class SettingsPage extends LitElement {
         <div class="actions-row">
           <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeCompanionAction('send_advert', undefined, 'Local Advert')}>Local Advert</button>
           <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeCompanionAction('send_advert', {flood: true}, 'Flood Advert')}>Flood Advert</button>
-          <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeCompanionAction('get_bat', undefined, 'Get Battery')}>Get Battery</button>
           <button class="action-btn" ?disabled=${!isOnline} @click=${() => this._executeCompanionAction('set_time', {val: Math.floor(Date.now() / 1000)}, 'Sync Clock')}>Sync Clock</button>
           <button class="action-btn" ?disabled=${!isOnline} @click=${this._onCompanionTrace}>Trace</button>
         </div>

@@ -6550,7 +6550,6 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
         <div class="actions-row">
           <button class="action-btn" ?disabled=${!t} @click=${()=>this._executeCompanionAction("send_advert",void 0,"Local Advert")}>Local Advert</button>
           <button class="action-btn" ?disabled=${!t} @click=${()=>this._executeCompanionAction("send_advert",{flood:!0},"Flood Advert")}>Flood Advert</button>
-          <button class="action-btn" ?disabled=${!t} @click=${()=>this._executeCompanionAction("get_bat",void 0,"Get Battery")}>Get Battery</button>
           <button class="action-btn" ?disabled=${!t} @click=${()=>this._executeCompanionAction("set_time",{val:Math.floor(Date.now()/1e3)},"Sync Clock")}>Sync Clock</button>
           <button class="action-btn" ?disabled=${!t} @click=${this._onCompanionTrace}>Trace</button>
         </div>
