@@ -1039,6 +1039,10 @@ export class NodeSummary extends LitElement {
     const eid = info.entity_id;
     const so = info.sortOrder;
 
+    // Radio fault flags (boolean problem sensors) live under Status, which
+    // is not skipped for companion devices.
+    if (info.booleanProblem) return 'Status';
+
     // Power group dropped. Battery (1) is hero-filtered; voltages (2) go
     // to Status (battery_voltage is hero-filtered, leaving Ch1 Voltage etc.).
     if (so === 2) return 'Status';
@@ -1071,6 +1075,26 @@ export class NodeSummary extends LitElement {
   // ─── Sensor row ───────────────────────────────────────────────────────
 
   private _renderRow(info: EntityInfo) {
+    // Boolean "problem" rows (companion radio fault flags) — show OK /
+    // Detected with a green/red dot instead of a numeric value + bar.
+    if (info.booleanProblem) {
+      const raw = this.hass?.states[info.entity_id]?.state;
+      const unknown = raw === undefined || raw === 'unknown' || raw === 'unavailable';
+      const on = raw === 'on';
+      const band: Band = unknown ? 'info' : (on ? 'bad' : 'good');
+      return html`
+        <tr class="data-row"
+            @click=${() => this._fireMoreInfo(info.entity_id)}
+            @contextmenu=${(e: MouseEvent) => this._fireContextMenu(e, info)}
+            ${longPress(() => this._fireContextMenu(undefined, info))}>
+          <td class="col-status"><span class="status-dot ${band}"></span></td>
+          <td class="col-label">${info.label}</td>
+          <td class="col-value">${unknown ? '—' : on ? 'Detected' : 'OK'}</td>
+          <td class="col-bar"></td>
+        </tr>
+      `;
+    }
+
     const value = this._readNumber(info.entity_id);
     const stateObj = this.hass?.states[info.entity_id];
     const unit = (stateObj?.attributes?.unit_of_measurement as string) ?? '';

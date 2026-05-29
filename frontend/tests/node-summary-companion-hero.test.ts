@@ -13,7 +13,7 @@ import { classifyEntity, type EntityInfo } from '../src/utils/classify-entity';
 import type { CompanionDeviceDescriptor } from '../src/components/node-summary';
 import type { HomeAssistant } from '../src/types';
 
-const PREFIX = 'sensor.meshcore_1ed4c1_';
+const NODE = 'meshcore_1ed4c1_';
 const SUFFIX = '_mattdub';
 
 interface RawSpec {
@@ -21,6 +21,7 @@ interface RawSpec {
   state: string;
   unit?: string;
   name?: string;
+  domain?: string; // 'sensor' (default) or 'binary_sensor'
 }
 
 // The companion's always-present (non-diagnostic) entities. These exist
@@ -39,7 +40,6 @@ const DIAGNOSTICS: RawSpec[] = [
   { key: 'battery_voltage', state: '4.1', unit: 'V', name: 'Battery Voltage' },
   { key: 'uptime', state: '0.705', unit: 'd', name: 'Uptime' },
   { key: 'tx_queue_len', state: '0', name: 'TX Queue Length' },
-  { key: 'errors', state: '0' }, // intentionally unnamed (matches host pre-fix)
   { key: 'noise_floor', state: '-110', unit: 'dBm', name: 'Noise Floor' },
   { key: 'last_rssi', state: '-52', unit: 'dBm', name: 'Last RSSI' },
   { key: 'last_snr', state: '11.75', unit: 'dB', name: 'Last SNR' },
@@ -52,17 +52,21 @@ const DIAGNOSTICS: RawSpec[] = [
   { key: 'recv_flood', state: '3188', name: 'Received Flood Messages' },
   { key: 'recv_direct', state: '84', name: 'Received Direct Messages' },
   { key: 'recv_errors', state: '638', name: 'Receive Errors' },
+  // Decoded radio fault flags (problem binary_sensors). One Detected, two OK.
+  { key: 'err_pool_full', state: 'on', domain: 'binary_sensor', name: 'Radio Fault: Packet Pool Exhausted' },
+  { key: 'err_cad_timeout', state: 'off', domain: 'binary_sensor', name: 'Radio Fault: CAD Timeout' },
+  { key: 'err_rx_timeout', state: 'off', domain: 'binary_sensor', name: 'Radio Fault: RX-Start Timeout' },
 ];
 
-function eid(key: string): string {
-  return `${PREFIX}${key}${SUFFIX}`;
+function eid(key: string, domain = 'sensor'): string {
+  return `${domain}.${NODE}${key}${SUFFIX}`;
 }
 
 function makeHass(specs: RawSpec[]): HomeAssistant {
   const states: Record<string, unknown> = {};
   for (const s of specs) {
-    states[eid(s.key)] = {
-      entity_id: eid(s.key),
+    states[eid(s.key, s.domain)] = {
+      entity_id: eid(s.key, s.domain),
       state: s.state,
       attributes: s.unit ? { unit_of_measurement: s.unit } : {},
       last_updated: new Date().toISOString(),
@@ -82,7 +86,7 @@ function makeHass(specs: RawSpec[]): HomeAssistant {
 // classifier (so these tests also cover the classify-entity changes).
 function classify(specs: RawSpec[]): EntityInfo[] {
   return specs
-    .map((s) => classifyEntity({ entity_id: eid(s.key), original_name: s.name }))
+    .map((s) => classifyEntity({ entity_id: eid(s.key, s.domain), original_name: s.name }))
     .filter((e): e is EntityInfo => e !== null);
 }
 
@@ -161,7 +165,18 @@ describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
     const tableText = table?.textContent ?? '';
     expect(tableText).toContain('Noise Floor');
     expect(tableText).toContain('TX Queue Length');
-    expect(tableText).toContain('Errors'); // the bare STATS_CORE error counter
+  });
+
+  it('renders the radio fault flags as OK / Detected problem rows', () => {
+    const table = el.shadowRoot?.querySelector('.sensor-table');
+    const tableText = table?.textContent ?? '';
+    // The three decoded fault binary_sensors appear as Status rows.
+    expect(tableText).toContain('Radio Fault: Packet Pool');
+    expect(tableText).toContain('Radio Fault: CAD Timeout');
+    expect(tableText).toContain('Radio Fault: RX-Start Timeout');
+    // err_pool_full is 'on' -> Detected; the other two 'off' -> OK.
+    expect(tableText).toContain('Detected');
+    expect(tableText).toContain('OK');
   });
 });
 
