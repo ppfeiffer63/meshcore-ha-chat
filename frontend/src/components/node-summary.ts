@@ -742,14 +742,18 @@ export class NodeSummary extends LitElement {
     // recv_errors (STATS_PACKETS counter): surfaced as a thin red line in the
     // bar stack plus an "Error N" legend item -- not a separate table row.
     // Applies to any node that reports it (companion + managed repeater).
-    // Error / duplicate shares are expressed relative to received messages
-    // (nb_recv) so the bars line up with the composition bar above them.
+    // Each bar is a percentage of its OWN total (verified against firmware):
+    //  - errors are CRC failures, DISJOINT from received (RadioLibWrappers:
+    //    n_recv vs n_recv_errors), so the error rate's denominator is all
+    //    reception attempts = received + errors.
+    //  - duplicates are a SUBSET of received, so their denominator is nb_recv.
     const recvErrorsInfo = this._findEntityIdMatching('recv_errors');
     const recvErrorsRaw = recvErrorsInfo
       ? this._readNumber(recvErrorsInfo.entity_id)
       : NaN;
     const recvErrorsN = Number.isFinite(recvErrorsRaw) ? recvErrorsRaw : 0;
-    const errRatio = totalRecv > 0 ? (recvErrorsN / totalRecv) * 100 : 0;
+    const attempts = totalRecv + recvErrorsN;
+    const errRatio = attempts > 0 ? (recvErrorsN / attempts) * 100 : 0;
     if (recvErrorsInfo) consumed.add(recvErrorsInfo.entity_id);
 
     return html`
@@ -762,12 +766,15 @@ export class NodeSummary extends LitElement {
               'Messages received (lifetime), split by receive mode:\n' +
               '• Flood — broadcast packets received from neighbours.\n' +
               '• Direct — routed packets where this node is on the path.\n\n' +
-              'Beneath the composition bar: a red line = receive errors and ' +
-              'an amber line = duplicate receptions, each as a share of ' +
-              'received messages. Both are context only, not banded — in a ' +
-              'flooding mesh every active neighbour retransmits the same ' +
-              'flood once, so a high duplicate ratio is normal (a 2-neighbour ' +
-              'repeater sees ~50%, a 3-neighbour ~67%, etc.).',
+              'Each bar below is a percentage of its own total:\n' +
+              '• Red = receive errors (CRC failures), as a share of all ' +
+              'reception attempts (received + errors) — i.e. the error rate.\n' +
+              '• Amber = duplicate receptions, as a share of received ' +
+              'messages (duplicates are a subset of received).\n\n' +
+              'Both are context only, not banded — in a flooding mesh every ' +
+              'active neighbour retransmits the same flood once, so a high ' +
+              'duplicate ratio is normal (a 2-neighbour repeater sees ~50%, ' +
+              'a 3-neighbour ~67%, etc.).',
           })}</span>
           <span class="status-dot info"></span>
         </div>
@@ -780,13 +787,13 @@ export class NodeSummary extends LitElement {
         </meshcore-stacked-bar>
         ${recvErrorsN > 0
           ? html`<div class="err-line"
-                      title="Receive errors: ${recvErrorsN} (${errRatio.toFixed(1)}% of received)">
+                      title="Receive errors (CRC failures): ${recvErrorsN} — ${errRatio.toFixed(1)}% of reception attempts (received + errors)">
               <div class="err-line-fill" style="width:${Math.min(100, errRatio).toFixed(1)}%"></div>
             </div>`
           : nothing}
         ${totalDups > 0
           ? html`<div class="dup-line"
-                      title="Duplicates: ${totalDups} (${dupRatio.toFixed(1)}% of received)">
+                      title="Duplicate receptions: ${totalDups} — ${dupRatio.toFixed(1)}% of received messages">
               <div class="dup-line-fill" style="width:${Math.min(100, dupRatio).toFixed(1)}%"></div>
             </div>`
           : nothing}

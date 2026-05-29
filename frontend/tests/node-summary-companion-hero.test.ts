@@ -166,12 +166,13 @@ describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
   });
 
   it('surfaces recv_errors as an "Error N" legend item and a red error line', () => {
-    // recv_errors 638 / nb_recv 3272 = 19.5% (share of received messages).
+    // Error rate = recv_errors / (recv_errors + nb_recv) = 638 / (638 + 3272)
+    // = 16.3% of reception attempts.
     const errLine = el.shadowRoot?.querySelector('.err-line') as HTMLElement | null;
     expect(errLine).toBeTruthy();
     const title = errLine?.getAttribute('title') ?? '';
     expect(title).toContain('638');
-    expect(title).toContain('19.5% of received');
+    expect(title).toContain('16.3% of reception attempts');
     // The count appears in the unified legend (node-summary's own shadow DOM).
     const legend = el.shadowRoot?.querySelector('.msg-legend');
     expect(legend?.textContent).toContain('Error 638');
