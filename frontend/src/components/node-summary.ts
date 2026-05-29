@@ -91,7 +91,9 @@ export class NodeSummary extends LitElement {
   private _rateHistoryKey: string | null = null;
 
   static styles = css`
-    :host { display: block; }
+    /* container-type lets the sensor grid's @container query react to this
+       card's own width rather than the raw viewport. */
+    :host { display: block; container-type: inline-size; }
 
     /* ─── Hero row ─── */
     .hero-row {
@@ -222,48 +224,55 @@ export class NodeSummary extends LitElement {
       margin-left: 6px;
     }
 
-    /* ─── Sensor table ─── */
-    .sensor-table {
-      width: 100%;
-      border-collapse: collapse;
+    /* ─── Sensor grid ─── responsive: one column on a narrow card, two
+       once the card is wide. The breakpoint is a @container query keyed on
+       :host's inline-size, so it reacts to the card width (panel layout,
+       sidebar state) rather than just the raw viewport. Category headers
+       span the full width so paired sensors stay within their category. */
+    .sensor-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      column-gap: 28px;
     }
-    .sensor-table tbody tr.data-row {
-      border-top: 1px solid var(--divider-color);
+    @container (min-width: 620px) {
+      .sensor-grid { grid-template-columns: 1fr 1fr; }
     }
-    .sensor-table tbody tr.data-row:first-child { border-top: none; }
-    .sensor-table tbody tr.data-row:hover {
-      background: rgba(127, 127, 127, 0.06);
-      cursor: pointer;
-    }
-    .sensor-table td {
-      padding: 8px 6px;
-      vertical-align: middle;
-      font-size: 13px;
-    }
-    .col-status { width: 14px; padding-left: 4px; padding-right: 0; }
-    .col-label  { width: 36%; color: var(--secondary-text-color); }
-    .col-value  {
-      width: 22%;
-      color: var(--primary-text-color);
-      font-weight: 500;
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-    .col-bar    { padding-left: 12px; padding-right: 0; }
-    .col-bar meshcore-stat-bar { width: 100%; min-width: 80px; }
-
-    .group-row td {
+    .group-label {
+      grid-column: 1 / -1;
       padding: 12px 4px 4px;
       font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: var(--secondary-text-color);
-      border-top: none !important;
     }
-    .group-row + tr.data-row { border-top: none !important; }
-
-    .stacked-row td.col-bar { padding-top: 6px; padding-bottom: 6px; }
+    .sensor-item {
+      display: grid;
+      grid-template-columns: 14px minmax(0, 1fr) auto minmax(72px, 120px);
+      align-items: center;
+      gap: 10px;
+      padding: 8px 4px;
+      border-top: 1px solid var(--divider-color);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .sensor-item:hover { background: rgba(127, 127, 127, 0.06); }
+    .si-label {
+      color: var(--secondary-text-color);
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .si-value {
+      color: var(--primary-text-color);
+      font-weight: 500;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .si-bar { min-width: 0; }
+    .si-bar meshcore-stat-bar { width: 100%; }
 
     .unit {
       font-size: 11px;
@@ -393,11 +402,9 @@ export class NodeSummary extends LitElement {
               : nothing}
           </div>
 
-          <table class="sensor-table">
-            <tbody>
-              ${groups.map((g) => this._renderGroup(g))}
-            </tbody>
-          </table>`
+          <div class="sensor-grid">
+            ${groups.map((g) => this._renderGroup(g))}
+          </div>`
         : nothing}
     `;
   }
@@ -1173,7 +1180,7 @@ export class NodeSummary extends LitElement {
 
   private _renderGroup(g: { name: GroupName; rows: TemplateResult[] }) {
     return html`
-      <tr class="group-row"><td colspan="4">${g.name}</td></tr>
+      <div class="group-label">${g.name}</div>
       ${g.rows}
     `;
   }
@@ -1189,15 +1196,15 @@ export class NodeSummary extends LitElement {
       const on = raw === 'on';
       const band: Band = unknown ? 'info' : (on ? 'bad' : 'good');
       return html`
-        <tr class="data-row"
-            @click=${() => this._fireMoreInfo(info.entity_id)}
-            @contextmenu=${(e: MouseEvent) => this._fireContextMenu(e, info)}
-            ${longPress(() => this._fireContextMenu(undefined, info))}>
-          <td class="col-status"><span class="status-dot ${band}"></span></td>
-          <td class="col-label">${info.label}</td>
-          <td class="col-value">${unknown ? '—' : on ? 'Detected' : 'OK'}</td>
-          <td class="col-bar"></td>
-        </tr>
+        <div class="sensor-item"
+             @click=${() => this._fireMoreInfo(info.entity_id)}
+             @contextmenu=${(e: MouseEvent) => this._fireContextMenu(e, info)}
+             ${longPress(() => this._fireContextMenu(undefined, info))}>
+          <span class="status-dot ${band}"></span>
+          <span class="si-label">${info.label}</span>
+          <span class="si-value">${unknown ? '—' : on ? 'Detected' : 'OK'}</span>
+          <span class="si-bar"></span>
+        </div>
       `;
     }
 
@@ -1223,21 +1230,18 @@ export class NodeSummary extends LitElement {
     const formattedValue = this._formatRowValue(info, value, stateObj?.state);
 
     return html`
-      <tr class="data-row"
-          @click=${() => this._fireMoreInfo(info.entity_id)}
-          @contextmenu=${(e: MouseEvent) => this._fireContextMenu(e, info)}
-          ${longPress(() => this._fireContextMenu(undefined, info))}>
-        <td class="col-status">
-          <span class="status-dot ${band}"></span>
-        </td>
-        <td class="col-label">
-          ${info.label}
-          ${tooltipEv ? this._renderInfoTip(tooltipEv) : nothing}
-        </td>
-        <td class="col-value">
+      <div class="sensor-item"
+           @click=${() => this._fireMoreInfo(info.entity_id)}
+           @contextmenu=${(e: MouseEvent) => this._fireContextMenu(e, info)}
+           ${longPress(() => this._fireContextMenu(undefined, info))}>
+        <span class="status-dot ${band}"></span>
+        <span class="si-label">
+          ${info.label}${tooltipEv ? this._renderInfoTip(tooltipEv) : nothing}
+        </span>
+        <span class="si-value">
           ${formattedValue}${unit ? html`<span class="unit">${unit}</span>` : nothing}
-        </td>
-        <td class="col-bar">
+        </span>
+        <span class="si-bar">
           ${ev && info.metricKey
             ? html`<meshcore-stat-bar
                 .value=${ev.fillPct}
@@ -1246,8 +1250,8 @@ export class NodeSummary extends LitElement {
                 .band=${band}>
               </meshcore-stat-bar>`
             : nothing}
-        </td>
-      </tr>
+        </span>
+      </div>
     `;
   }
 

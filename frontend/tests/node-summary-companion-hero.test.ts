@@ -190,7 +190,7 @@ describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
   });
 
   it('populates the SENSORS table with the remaining diagnostics', () => {
-    const table = el.shadowRoot?.querySelector('.sensor-table');
+    const table = el.shadowRoot?.querySelector('.sensor-grid');
     expect(table).toBeTruthy();
     const tableText = table?.textContent ?? '';
     expect(tableText).toContain('Noise Floor');
@@ -198,7 +198,7 @@ describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
   });
 
   it('renders the radio fault flags as OK / Detected problem rows', () => {
-    const table = el.shadowRoot?.querySelector('.sensor-table');
+    const table = el.shadowRoot?.querySelector('.sensor-grid');
     const tableText = table?.textContent ?? '';
     // The three decoded fault binary_sensors appear as Status rows.
     expect(tableText).toContain('Radio Fault: Packet Pool');
