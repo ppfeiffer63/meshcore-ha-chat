@@ -496,6 +496,9 @@ export class NodeSummary extends LitElement {
     return this._renderClientHero(consumed);
   }
 
+  // Managed-device (repeater/client) location is shown as a compact "Loc:"
+  // stat in the card header (devices-page) rather than a hero tile, so it is
+  // not rendered here. The companion keeps its Location hero tile.
   private _renderRepeaterHero(consumed: Set<string>) {
     return html`
       ${this._renderBatteryTile()}
@@ -504,7 +507,6 @@ export class NodeSummary extends LitElement {
       ${this._renderMessagesSentTile(consumed)}
       ${this._renderMessagesReceivedTile(consumed)}
       ${this._renderRequestsTile(consumed)}
-      ${this._renderLocationTile()}
     `;
   }
 
@@ -513,7 +515,6 @@ export class NodeSummary extends LitElement {
       ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
       ${this._renderRequestsTile(consumed)}
-      ${this._renderLocationTile()}
     `;
   }
 

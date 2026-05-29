@@ -3631,12 +3631,10 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       ${this._renderMessagesSentTile(e)}
       ${this._renderMessagesReceivedTile(e)}
       ${this._renderRequestsTile(e)}
-      ${this._renderLocationTile()}
     `}_renderClientHero(e){return j`
       ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
       ${this._renderRequestsTile(e)}
-      ${this._renderLocationTile()}
     `}_renderCompanionHero(e){return j`
       ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
@@ -4654,7 +4652,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
 
       <!-- Status Toast -->
       ${this._statusMessage?j`<div class="status-toast ${this._statusMessage.type}">${"success"===this._statusMessage.type?"✓ ":"✗ "}${this._statusMessage.text}</div>`:W}
-    `:j`<div class="content-area"><div class="loading-state"><div class="loading-spinner"></div> Initializing...</div></div>`}_renderDeviceSections(e,t){return e.map(e=>this._renderDeviceSection(e,t))}_renderDeviceSection(e,t){let i="unknown",o="Unknown";if(e.status_entity_id&&this.hass?.states[e.status_entity_id]){const t=this.hass.states[e.status_entity_id].state;"on"===t?(i="online",o="Online"):"off"===t&&(i="offline",o="Offline")}else e.status&&(i="online"===e.status?"online":"offline"===e.status?"offline":"unknown",o="online"===e.status?"Online":"offline"===e.status?"Offline":"Unknown");const r="online"===i,s=this._getManagedDeviceKey(e,t),a=this._getDeviceEntities(e,t),n=(this._hiddenSensors[s]||[]).length,d="repeater"===t&&e.neighbors_enabled,l=this._neighborData[e.pubkey_prefix],c=a.find(e=>"uptime_hours"===e.metricKey),p=r&&c?this._formatUptimeFromEntity(c.entity_id):"",h=this._contactsByPrefix[e.pubkey_prefix?.toLowerCase()],u=h?.adv_lat,g=h?.adv_lon,m=h?.last_advert;return d&&!l&&this._loadNeighbors(e),j`
+    `:j`<div class="content-area"><div class="loading-state"><div class="loading-spinner"></div> Initializing...</div></div>`}_renderDeviceSections(e,t){return e.map(e=>this._renderDeviceSection(e,t))}_renderDeviceSection(e,t){let i="unknown",o="Unknown";if(e.status_entity_id&&this.hass?.states[e.status_entity_id]){const t=this.hass.states[e.status_entity_id].state;"on"===t?(i="online",o="Online"):"off"===t&&(i="offline",o="Offline")}else e.status&&(i="online"===e.status?"online":"offline"===e.status?"offline":"unknown",o="online"===e.status?"Online":"offline"===e.status?"Offline":"Unknown");const r="online"===i,s=this._getManagedDeviceKey(e,t),a=this._getDeviceEntities(e,t),n=(this._hiddenSensors[s]||[]).length,d="repeater"===t&&e.neighbors_enabled,l=this._neighborData[e.pubkey_prefix],c=a.find(e=>"uptime_hours"===e.metricKey),p=r&&c?this._formatUptimeFromEntity(c.entity_id):"",h=this._contactsByPrefix[e.pubkey_prefix?.toLowerCase()],u=h?.adv_lat,g=h?.adv_lon,m=h?.last_advert,v="number"==typeof u?u:NaN,f="number"==typeof g?g:NaN,y=Number.isFinite(v)&&Number.isFinite(f)&&(0!==v||0!==f);return d&&!l&&this._loadNeighbors(e),j`
       <div class="device-section" @tile-context-menu=${e=>this._onTileContextMenu(e,s)}>
         <div class="section-header">
           <div class="section-title">
@@ -4667,6 +4665,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
                 <span>${"repeater"===t?"Repeater":"Client"}</span>
                 ${e.firmware_version?j`<span>Firmware: v${e.firmware_version.match(/(\d+\.\d+\.\d+)/)?.[1]??e.firmware_version}</span>`:W}
                 <span>Key: ${e.pubkey_prefix}</span>
+                ${y?j`<span>Loc: ${v.toFixed(4)}, ${f.toFixed(4)}</span>`:W}
               </div>
             </div>
           </div>
