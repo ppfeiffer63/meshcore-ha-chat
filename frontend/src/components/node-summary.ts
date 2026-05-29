@@ -512,15 +512,14 @@ export class NodeSummary extends LitElement {
 
   // Companion hero mirrors the repeater hero so the locally-attached node
   // gets the same rich tiles once its self-diagnostic entities exist. Every
-  // tile self-hides when its backing entity is absent, so a companion
-  // without Self Diagnostics enabled upstream degrades to the prior minimal
-  // hero (Power · Mesh nodes · Location). The battery slot uses
-  // _renderCompanionPowerTile (battery card when present, "USB / mains"
-  // otherwise) — never _renderBatteryTile directly, to avoid drawing the
-  // battery card twice on battery-powered companions.
+  // tile self-hides when its backing entity is absent, so a companion with
+  // no Self Diagnostics and no battery simply renders no hero tiles. The
+  // battery slot uses _renderBatteryTile directly — it shows the battery
+  // card when a battery is present and renders nothing otherwise (no "USB /
+  // mains" placeholder).
   private _renderCompanionHero(consumed: Set<string>) {
     return html`
-      ${this._renderCompanionPowerTile()}
+      ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
       ${this._renderCompanionRadioActivityTile()}
       ${this._renderMessagesSentTile(consumed)}
@@ -956,18 +955,9 @@ export class NodeSummary extends LitElement {
   // to the Settings-tab device header (next to Firmware / Key) as a compact
   // "Added nodes" stat — see settings-page.ts.
 
-  private _renderCompanionPowerTile() {
-    const battery = this._findByMetric('battery_pct');
-    if (battery) return this._renderBatteryTile();
-    return html`
-      <div class="hero-tile">
-        <div class="hero-tile-head"><span>Power</span></div>
-        <div class="hero-tile-value">
-          <span class="primary" style="font-size:16px;">USB / mains</span>
-        </div>
-      </div>
-    `;
-  }
+  // _renderCompanionPowerTile removed: the companion battery slot now uses
+  // _renderBatteryTile directly, which renders nothing when there's no
+  // battery (no "USB / mains" placeholder tile).
 
   // Radio Activity tile for the companion node. A managed repeater reports
   // a windowed *_airtime_utilization percentage that _renderRadioActivityTile

@@ -3640,7 +3640,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       ${this._renderRequestsTile(e)}
       ${this._renderLocationTile()}
     `}_renderCompanionHero(e){return U`
-      ${this._renderCompanionPowerTile()}
+      ${this._renderBatteryTile()}
       ${this._renderSignalTile()}
       ${this._renderCompanionRadioActivityTile()}
       ${this._renderMessagesSentTile(e)}
@@ -3786,14 +3786,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
         </div>
         ${n?U`<div class="loc-updated">Updated ${n}</div>`:W}
       </div>
-    `}_formatRelativeTime(e){const t=(Date.now()-e.getTime())/1e3;return!Number.isFinite(t)||t<0||t<60?"just now":t<3600?`${Math.floor(t/60)} min ago`:t<86400?`${Math.floor(t/3600)} h ago`:`${Math.floor(t/86400)} d ago`}_renderCompanionPowerTile(){return this._findByMetric("battery_pct")?this._renderBatteryTile():U`
-      <div class="hero-tile">
-        <div class="hero-tile-head"><span>Power</span></div>
-        <div class="hero-tile-value">
-          <span class="primary" style="font-size:16px;">USB / mains</span>
-        </div>
-      </div>
-    `}_renderCompanionRadioActivityTile(){const e=this._findEntityIdMatching("tx_airtime"),t=this._findEntityIdMatching("rx_airtime"),i=this._findByMetric("uptime_hours");if(!e&&!t||!i)return W;const o=this._readUptimeMinutes(i);if(!Number.isFinite(o)||o<=0)return W;const r=e?this._readNumber(e.entity_id):0,s=t?this._readNumber(t.entity_id):0;if(!Number.isFinite(r)&&!Number.isFinite(s))return W;const a=e=>Number.isFinite(e)?Math.min(100,Math.max(0,e/o*100)):0,n=a(r),d=a(s),l=Math.max(0,100-n-d),c=ot("tx_airtime_util",n).band,p=ot("rx_airtime_util",d).band,h=this._worseBand(c,p),u=[{value:n,label:`TX ${n.toFixed(1)}%`,kind:"tx"},{value:d,label:`RX ${d.toFixed(1)}%`,kind:"rx"},{value:l,label:`Idle ${l.toFixed(1)}%`,kind:"idle"}],g=n+d;return U`
+    `}_formatRelativeTime(e){const t=(Date.now()-e.getTime())/1e3;return!Number.isFinite(t)||t<0||t<60?"just now":t<3600?`${Math.floor(t/60)} min ago`:t<86400?`${Math.floor(t/3600)} h ago`:`${Math.floor(t/86400)} d ago`}_renderCompanionRadioActivityTile(){const e=this._findEntityIdMatching("tx_airtime"),t=this._findEntityIdMatching("rx_airtime"),i=this._findByMetric("uptime_hours");if(!e&&!t||!i)return W;const o=this._readUptimeMinutes(i);if(!Number.isFinite(o)||o<=0)return W;const r=e?this._readNumber(e.entity_id):0,s=t?this._readNumber(t.entity_id):0;if(!Number.isFinite(r)&&!Number.isFinite(s))return W;const a=e=>Number.isFinite(e)?Math.min(100,Math.max(0,e/o*100)):0,n=a(r),d=a(s),l=Math.max(0,100-n-d),c=ot("tx_airtime_util",n).band,p=ot("rx_airtime_util",d).band,h=this._worseBand(c,p),u=[{value:n,label:`TX ${n.toFixed(1)}%`,kind:"tx"},{value:d,label:`RX ${d.toFixed(1)}%`,kind:"rx"},{value:l,label:`Idle ${l.toFixed(1)}%`,kind:"idle"}],g=n+d;return U`
       <div class="hero-tile"
            @click=${()=>e&&this._fireMoreInfo(e.entity_id)}>
         <div class="hero-tile-head">

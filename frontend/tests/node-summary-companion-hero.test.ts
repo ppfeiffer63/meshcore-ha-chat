@@ -217,9 +217,11 @@ describe('node-summary companion hero — Self Diagnostics DISABLED (graceful de
   });
   afterEach(() => el.remove());
 
-  it('falls back to the minimal hero (Power tile only)', () => {
+  it('renders no hero tiles (no battery, diagnostics off, no GPS)', () => {
     const text = el.shadowRoot?.textContent ?? '';
-    expect(text).toContain('USB / mains'); // power tile, no battery entity
+    // Power tile removed entirely when there's no battery (no "USB / mains").
+    expect(text).not.toContain('USB / mains');
+    expect(text).not.toContain('Battery');
     // Mesh nodes moved to the header; Location hidden (no coordinates).
     expect(text).not.toContain('Mesh nodes');
     expect(text).not.toContain('Location');
@@ -231,6 +233,21 @@ describe('node-summary companion hero — Self Diagnostics DISABLED (graceful de
     expect(text).not.toContain('Last message strength');
     expect(text).not.toContain('Messages Sent');
     expect(text).not.toContain('Messages Received');
+  });
+});
+
+describe('node-summary companion hero — Power tile visibility', () => {
+  it('omits the Power tile when there is no battery (diagnostics on)', async () => {
+    const noBattery = DIAGNOSTICS.filter((s) => !s.key.startsWith('battery'));
+    const el = await mount([...BASE, ...LOCATION, ...noBattery]);
+    const text = el.shadowRoot?.textContent ?? '';
+    expect(text).not.toContain('USB / mains');
+    const heads = Array.from(el.shadowRoot?.querySelectorAll('.hero-tile-head') ?? [])
+      .map((h) => (h.textContent ?? '').trim());
+    expect(heads.some((t) => t.startsWith('Battery'))).toBe(false);
+    // Other diagnostic tiles still render.
+    expect(text).toContain('Last message strength');
+    el.remove();
   });
 });
 
