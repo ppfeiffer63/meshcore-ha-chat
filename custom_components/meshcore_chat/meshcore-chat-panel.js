@@ -4958,7 +4958,11 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
 
       .neighbor-table {
         width: 100%;
-        border-collapse: collapse;
+        /* separate (not collapse) so the 1px row dividers render the same
+           crisp/light line as the node-summary sensor grid, rather than the
+           slightly heavier collapsed-border rendering. */
+        border-collapse: separate;
+        border-spacing: 0;
         font-size: 13px;
         margin-top: 8px;
       }
