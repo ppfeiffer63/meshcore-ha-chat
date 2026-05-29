@@ -3578,7 +3578,6 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
       ${this._renderCompanionRadioActivityTile()}
       ${this._renderMessagesSentTile(e)}
       ${this._renderMessagesReceivedTile(e)}
-      ${this._renderMeshNodeCountTile()}
       ${this._renderLocationTile()}
     `}_renderBatteryTile(){const e=this._findByMetric("battery_pct");if(!e)return W;const t=this._readNumber(e.entity_id),i=this._findEntityIdMatching("battery_voltage")??this._findEntityByLabel("Voltage"),o=i?this._readNumber(i.entity_id):NaN,r=ot("battery_pct",t);return U`
       <div class="hero-tile" @click=${()=>this._fireMoreInfo(e.entity_id)}>
@@ -3707,7 +3706,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
           .legend=${"inline"}>
         </meshcore-stacked-bar>
       </div>
-    `}_formatCount(e){return Number.isFinite(e)?Math.round(e).toLocaleString():"—"}_renderLocationTile(){const e=this._findEntityIdMatching("latitude"),t=this._findEntityIdMatching("longitude");let i=e?this._readNumber(e.entity_id):NaN,o=t?this._readNumber(t.entity_id):NaN,r="entity";!Number.isFinite(i)&&Number.isFinite(this.fallbackLatitude)&&(i=this.fallbackLatitude,r="fallback"),!Number.isFinite(o)&&Number.isFinite(this.fallbackLongitude)&&(o=this.fallbackLongitude,r="fallback");const s=Number.isFinite(i)&&Number.isFinite(o)&&(0!==i||0!==o);let a=null;if("entity"===r&&e){const t=this.hass?.states[e.entity_id]?.last_updated;if(t){const e=new Date(t);Number.isNaN(e.getTime())||(a=e)}}else"fallback"===r&&Number.isFinite(this.fallbackUpdated)&&(a=new Date(1e3*this.fallbackUpdated));const n=s&&a?this._formatRelativeTime(a):"";return U`
+    `}_formatCount(e){return Number.isFinite(e)?Math.round(e).toLocaleString():"—"}_renderLocationTile(){const e=this._findEntityIdMatching("latitude"),t=this._findEntityIdMatching("longitude");let i=e?this._readNumber(e.entity_id):NaN,o=t?this._readNumber(t.entity_id):NaN,r="entity";!Number.isFinite(i)&&Number.isFinite(this.fallbackLatitude)&&(i=this.fallbackLatitude,r="fallback"),!Number.isFinite(o)&&Number.isFinite(this.fallbackLongitude)&&(o=this.fallbackLongitude,r="fallback");const s=Number.isFinite(i)&&Number.isFinite(o)&&(0!==i||0!==o);if(!s)return W;let a=null;if("entity"===r&&e){const t=this.hass?.states[e.entity_id]?.last_updated;if(t){const e=new Date(t);Number.isNaN(e.getTime())||(a=e)}}else"fallback"===r&&Number.isFinite(this.fallbackUpdated)&&(a=new Date(1e3*this.fallbackUpdated));const n=s&&a?this._formatRelativeTime(a):"";return U`
       <div class="hero-tile" @click=${()=>{e&&this._fireMoreInfo(e.entity_id)}}>
         <div class="hero-tile-head">
           <span>Location${"fallback"===r?U`<span style="opacity:0.55;text-transform:none;letter-spacing:0;font-size:10px;margin-left:4px;">via contact</span>`:W}</span>
@@ -3719,15 +3718,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
         </div>
         ${n?U`<div class="loc-updated">Updated ${n}</div>`:W}
       </div>
-    `}_formatRelativeTime(e){const t=(Date.now()-e.getTime())/1e3;return!Number.isFinite(t)||t<0||t<60?"just now":t<3600?`${Math.floor(t/60)} min ago`:t<86400?`${Math.floor(t/3600)} h ago`:`${Math.floor(t/86400)} d ago`}_renderMeshNodeCountTile(){const e=this._findEntityIdMatching("node_count"),t=e?this._readNumber(e.entity_id):NaN;return U`
-      <div class="hero-tile"
-           @click=${()=>e&&this._fireMoreInfo(e.entity_id)}>
-        <div class="hero-tile-head"><span>Mesh nodes</span></div>
-        <div class="hero-tile-value">
-          <span class="primary">${Number.isFinite(t)?t:"—"}</span>
-        </div>
-      </div>
-    `}_renderCompanionPowerTile(){return this._findByMetric("battery_pct")?this._renderBatteryTile():U`
+    `}_formatRelativeTime(e){const t=(Date.now()-e.getTime())/1e3;return!Number.isFinite(t)||t<0||t<60?"just now":t<3600?`${Math.floor(t/60)} min ago`:t<86400?`${Math.floor(t/3600)} h ago`:`${Math.floor(t/86400)} d ago`}_renderCompanionPowerTile(){return this._findByMetric("battery_pct")?this._renderBatteryTile():U`
       <div class="hero-tile">
         <div class="hero-tile-head"><span>Power</span></div>
         <div class="hero-tile-value">
@@ -6398,7 +6389,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
         ?narrow=${this.narrow}
         @close=${this._onCommandDialogClose}>
       </meshcore-command-dialog>
-    `:U`<div>No device config loaded</div>`}_renderCompanionCard(){if(!this.selectedDevice)return W;const e=this.selectedDevice,t=e.connected,i=this._getCompanionDeviceKey(),o=this._getCompanionEntities(),r=(this._hiddenSensors[i]||[]).length;return U`
+    `:U`<div>No device config loaded</div>`}_renderCompanionCard(){if(!this.selectedDevice)return W;const e=this.selectedDevice,t=e.connected,i=this._getCompanionDeviceKey(),o=this._getCompanionEntities(),r=(this._hiddenSensors[i]||[]).length,s=o.find(e=>e.entity_id.includes("node_count")),a=s?this.hass?.states[s.entity_id]?.state:void 0,n=a&&"unavailable"!==a&&"unknown"!==a?a:void 0;return U`
       <div class="device-section" @tile-context-menu=${e=>this._onTileContextMenu(e,i)}>
         <div class="companion-header">
           <div class="section-title">
@@ -6411,6 +6402,7 @@ function e(e,t,i,o){var r,s=arguments.length,a=s<3?t:null===o?o=Object.getOwnPro
                 <span>Companion</span>
                 <span>Firmware: ${e.firmware||"unknown"}</span>
                 <span>Key: ${e.pubkey_prefix}</span>
+                ${void 0!==n?U`<span>Added nodes: ${n}</span>`:W}
               </div>
             </div>
           </div>

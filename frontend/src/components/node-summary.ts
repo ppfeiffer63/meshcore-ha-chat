@@ -383,7 +383,6 @@ export class NodeSummary extends LitElement {
       ${this._renderCompanionRadioActivityTile()}
       ${this._renderMessagesSentTile(consumed)}
       ${this._renderMessagesReceivedTile(consumed)}
-      ${this._renderMeshNodeCountTile()}
       ${this._renderLocationTile()}
     `;
   }
@@ -772,6 +771,11 @@ export class NodeSummary extends LitElement {
     const hasGps = Number.isFinite(latVal) && Number.isFinite(lonVal)
                    && (latVal !== 0 || lonVal !== 0);
 
+    // Nothing to show: no usable coordinates (no GPS entity/fallback, or a
+    // 0,0 placeholder). Hide the tile entirely rather than render an empty
+    // "—" that just wastes hero space.
+    if (!hasGps) return nothing;
+
     // "Updated X ago" timestamp resolution:
     //  - Entity-based location: HA state's `last_updated` (ISO string).
     //  - Fallback location:    `fallbackUpdated` prop (Unix seconds,
@@ -826,19 +830,9 @@ export class NodeSummary extends LitElement {
     return `${Math.floor(deltaSec / 86400)} d ago`;
   }
 
-  private _renderMeshNodeCountTile() {
-    const nodeCount = this._findEntityIdMatching('node_count');
-    const val = nodeCount ? this._readNumber(nodeCount.entity_id) : NaN;
-    return html`
-      <div class="hero-tile"
-           @click=${() => nodeCount && this._fireMoreInfo(nodeCount.entity_id)}>
-        <div class="hero-tile-head"><span>Mesh nodes</span></div>
-        <div class="hero-tile-value">
-          <span class="primary">${Number.isFinite(val) ? val : '—'}</span>
-        </div>
-      </div>
-    `;
-  }
+  // _renderMeshNodeCountTile removed: the companion's added-node count moved
+  // to the Settings-tab device header (next to Firmware / Key) as a compact
+  // "Added nodes" stat — see settings-page.ts.
 
   private _renderCompanionPowerTile() {
     const battery = this._findByMetric('battery_pct');

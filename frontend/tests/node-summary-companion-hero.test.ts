@@ -28,6 +28,18 @@ interface RawSpec {
 // regardless of the Self Diagnostics toggle.
 const BASE: RawSpec[] = [
   { key: 'node_count', state: '6', name: 'Node Count' },
+];
+
+// A real GPS fix — the Location tile renders only when coordinates are
+// present and non-zero.
+const LOCATION: RawSpec[] = [
+  { key: 'latitude', state: '34.0522', name: 'Latitude' },
+  { key: 'longitude', state: '-118.2437', name: 'Longitude' },
+];
+
+// A 0,0 placeholder — the companion's "no fix" state. The Location tile
+// must hide for this exactly as it does when the entities are absent.
+const LOCATION_BLANK: RawSpec[] = [
   { key: 'latitude', state: '0.0', name: 'Latitude' },
   { key: 'longitude', state: '0.0', name: 'Longitude' },
 ];
@@ -125,7 +137,7 @@ function heroHeads(el: Card): string[] {
 describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
   let el: Card;
   beforeEach(async () => {
-    el = await mount([...BASE, ...DIAGNOSTICS]);
+    el = await mount([...BASE, ...LOCATION, ...DIAGNOSTICS]);
   });
   afterEach(() => el.remove());
 
@@ -136,8 +148,9 @@ describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
     expect(text).toContain('Radio activity');         // derived from airtime/uptime
     expect(text).toContain('Messages Sent');
     expect(text).toContain('Messages Received');
-    expect(text).toContain('Mesh nodes');
-    expect(text).toContain('Location');
+    expect(text).toContain('Location'); // real coords present -> tile shows
+    // Mesh nodes moved to the Settings-tab header; no longer a hero tile.
+    expect(text).not.toContain('Mesh nodes');
   });
 
   it('draws the battery tile exactly once (no double battery)', () => {
@@ -187,11 +200,12 @@ describe('node-summary companion hero — Self Diagnostics DISABLED (graceful de
   });
   afterEach(() => el.remove());
 
-  it('falls back to the minimal hero (Power · Mesh nodes · Location)', () => {
+  it('falls back to the minimal hero (Power tile only)', () => {
     const text = el.shadowRoot?.textContent ?? '';
     expect(text).toContain('USB / mains'); // power tile, no battery entity
-    expect(text).toContain('Mesh nodes');
-    expect(text).toContain('Location');
+    // Mesh nodes moved to the header; Location hidden (no coordinates).
+    expect(text).not.toContain('Mesh nodes');
+    expect(text).not.toContain('Location');
   });
 
   it('hides the diagnostic-dependent tiles when their entities are absent', () => {
@@ -200,5 +214,19 @@ describe('node-summary companion hero — Self Diagnostics DISABLED (graceful de
     expect(text).not.toContain('Last message strength');
     expect(text).not.toContain('Messages Sent');
     expect(text).not.toContain('Messages Received');
+  });
+});
+
+describe('node-summary companion hero — Location tile visibility', () => {
+  it('shows the Location tile when coordinates are present', async () => {
+    const el = await mount([...BASE, ...LOCATION, ...DIAGNOSTICS]);
+    expect(el.shadowRoot?.textContent ?? '').toContain('Location');
+    el.remove();
+  });
+
+  it('hides the Location tile for a 0,0 placeholder fix', async () => {
+    const el = await mount([...BASE, ...LOCATION_BLANK, ...DIAGNOSTICS]);
+    expect(el.shadowRoot?.textContent ?? '').not.toContain('Location');
+    el.remove();
   });
 });
