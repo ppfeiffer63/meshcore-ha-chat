@@ -15,7 +15,7 @@ The panel lives in the HA sidebar under **MeshCore Chat**. It opens to the **Cha
 - **Chat** — channels, DMs, message history, cross-conversation search, and per-message route popups (click any message bubble for Copy / Reply, plus the route metadata: hop sequence, SNR, RSSI, and exact receive timestamp).
 - **Devices** — per-device sensor cards for every managed repeater and client, plus action buttons (Flood Advert, Sync Clock, Req Telemetry, Req Status, Issue Command, Reboot).
 - **Nodes** — full network discovery view. Every node the companion has heard, filterable by Added vs Discovered and by node type.
-- **Settings** — your companion's profile, radio configuration, location source, identity, and a local Issue Command launcher.
+- **Settings** — your companion's profile, radio configuration, location source, identity, and a local Issue Command launcher. The companion card shows the same rich sensor tiles managed devices get (battery, signal, radio activity, message counts) plus a diagnostics table — but only once you enable **Self Diagnostics** in the upstream meshcore integration's options (it's off by default; the tiles self-hide until then). Those entities are created by the upstream integration; the chat panel only renders them.
 
 The header carries a device switcher (when more than one upstream `meshcore` config entry is present) plus a connection status indicator. If the badge says **Offline**, the companion radio isn't talking to HA — fix that in the upstream integration before the chat panel can do anything useful.
 

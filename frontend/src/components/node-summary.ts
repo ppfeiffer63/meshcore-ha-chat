@@ -298,6 +298,8 @@ export class NodeSummary extends LitElement {
       color: var(--primary-text-color);
       font-style: normal;
     }
+    .dup-annotation.err { cursor: pointer; }
+    .dup-annotation.err .num { color: var(--warning, #ff9800); }
   `;
 
   // ─── Render ────────────────────────────────────────────────────────────
@@ -340,7 +342,7 @@ export class NodeSummary extends LitElement {
 
   private _renderHeroTiles(consumed: Set<string>): TemplateResult | typeof nothing {
     const dev = this.device!;
-    if (dev.type === 'companion') return this._renderCompanionHero();
+    if (dev.type === 'companion') return this._renderCompanionHero(consumed);
     if (dev.type === 'repeater') return this._renderRepeaterHero(consumed);
     return this._renderClientHero(consumed);
   }
@@ -366,11 +368,23 @@ export class NodeSummary extends LitElement {
     `;
   }
 
-  private _renderCompanionHero() {
+  // Companion hero mirrors the repeater hero so the locally-attached node
+  // gets the same rich tiles once its self-diagnostic entities exist. Every
+  // tile self-hides when its backing entity is absent, so a companion
+  // without Self Diagnostics enabled upstream degrades to the prior minimal
+  // hero (Power · Mesh nodes · Location). The battery slot uses
+  // _renderCompanionPowerTile (battery card when present, "USB / mains"
+  // otherwise) — never _renderBatteryTile directly, to avoid drawing the
+  // battery card twice on battery-powered companions.
+  private _renderCompanionHero(consumed: Set<string>) {
     return html`
+      ${this._renderCompanionPowerTile()}
+      ${this._renderSignalTile()}
+      ${this._renderCompanionRadioActivityTile()}
+      ${this._renderMessagesSentTile(consumed)}
+      ${this._renderMessagesReceivedTile(consumed)}
       ${this._renderMeshNodeCountTile()}
       ${this._renderLocationTile()}
-      ${this._renderCompanionPowerTile()}
     `;
   }
 
@@ -611,6 +625,23 @@ export class NodeSummary extends LitElement {
     if (floodDups) consumed.add(floodDups.entity_id);
     if (directDups) consumed.add(directDups.entity_id);
 
+    // Companion nodes expose a recv_errors counter (STATS_PACKETS). Surface
+    // it as an RX-error annotation here -- count plus error rate as a
+    // fraction of all received-frame attempts (good frames + errors) -- and
+    // consume the entity so it doesn't also render as a table row. Gated to
+    // companion so managed-repeater hero rendering is unchanged.
+    const isCompanion = this.device?.type === 'companion';
+    const recvErrorsInfo = isCompanion
+      ? this._findEntityIdMatching('recv_errors')
+      : undefined;
+    const recvErrorsRaw = recvErrorsInfo
+      ? this._readNumber(recvErrorsInfo.entity_id)
+      : NaN;
+    const recvErrorsN = Number.isFinite(recvErrorsRaw) ? recvErrorsRaw : 0;
+    const errDenom = totalRecv + recvErrorsN;
+    const errRatio = errDenom > 0 ? (recvErrorsN / errDenom) * 100 : 0;
+    if (recvErrorsInfo) consumed.add(recvErrorsInfo.entity_id);
+
     return html`
       <div class="hero-tile" @click=${() => this._fireMoreInfo(nbRecv.entity_id)}>
         <div class="hero-tile-head">
@@ -649,6 +680,17 @@ export class NodeSummary extends LitElement {
               + <span class="num">${totalDups}</span>
               duplicate${totalDups === 1 ? '' : 's'}
               (${dupRatio.toFixed(1)}% of recv)
+            </div>`
+          : nothing}
+        ${recvErrorsInfo && recvErrorsN > 0
+          ? html`<div class="dup-annotation err"
+                      @click=${(e: Event) => {
+                        e.stopPropagation();
+                        this._fireMoreInfo(recvErrorsInfo.entity_id);
+                      }}>
+              + <span class="num">${recvErrorsN}</span>
+              receive error${recvErrorsN === 1 ? '' : 's'}
+              (${errRatio.toFixed(1)}% of RX)
             </div>`
           : nothing}
       </div>
@@ -809,6 +851,120 @@ export class NodeSummary extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  // Radio Activity tile for the companion node. A managed repeater reports
+  // a windowed *_airtime_utilization percentage that _renderRadioActivityTile
+  // consumes directly; the companion exposes only RAW cumulative airtime
+  // (tx_airtime / rx_airtime, minutes) plus uptime. Derive a lifetime-average
+  // duty composition (airtime ÷ uptime) so the companion gets the same tile.
+  // Self-hides when airtime or uptime is absent/unavailable (e.g. Self
+  // Diagnostics disabled upstream), preserving graceful degradation.
+  private _renderCompanionRadioActivityTile() {
+    const txAir = this._findEntityIdMatching('tx_airtime');
+    const rxAir = this._findEntityIdMatching('rx_airtime');
+    const uptimeInfo = this._findByMetric('uptime_hours');
+    if ((!txAir && !rxAir) || !uptimeInfo) return nothing;
+
+    const uptimeMin = this._readUptimeMinutes(uptimeInfo);
+    if (!Number.isFinite(uptimeMin) || uptimeMin <= 0) return nothing;
+
+    const txMin = txAir ? this._readNumber(txAir.entity_id) : 0;
+    const rxMin = rxAir ? this._readNumber(rxAir.entity_id) : 0;
+    // If neither airtime value is readable the tile carries no information.
+    if (!Number.isFinite(txMin) && !Number.isFinite(rxMin)) return nothing;
+
+    const pct = (m: number) =>
+      Number.isFinite(m) ? Math.min(100, Math.max(0, (m / uptimeMin) * 100)) : 0;
+    const txN = pct(txMin);
+    const rxN = pct(rxMin);
+    const idleN = Math.max(0, 100 - txN - rxN);
+
+    // Reuse the repeater airtime-utilisation threshold bands for the dot.
+    const txBand = evaluateSensor('tx_airtime_util', txN).band;
+    const rxBand = evaluateSensor('rx_airtime_util', rxN).band;
+    const dotBand: Band = this._worseBand(txBand, rxBand);
+
+    const segments: StackedBarSegment[] = [
+      { value: txN, label: `TX ${txN.toFixed(1)}%`, kind: 'tx' },
+      { value: rxN, label: `RX ${rxN.toFixed(1)}%`, kind: 'rx' },
+      { value: idleN, label: `Idle ${idleN.toFixed(1)}%`, kind: 'idle' },
+    ];
+
+    const totalUsed = txN + rxN;
+    const onTxClick = (e: Event) => {
+      e.stopPropagation();
+      if (txAir) this._fireMoreInfo(txAir.entity_id);
+    };
+    const onRxClick = (e: Event) => {
+      e.stopPropagation();
+      if (rxAir) this._fireMoreInfo(rxAir.entity_id);
+    };
+
+    return html`
+      <div class="hero-tile"
+           @click=${() => txAir && this._fireMoreInfo(txAir.entity_id)}>
+        <div class="hero-tile-head">
+          <span>Radio activity${this._renderInfoTip({
+            band: dotBand,
+            fillPct: 0,
+            tooltip: 'Lifetime-average half-duplex composition: cumulative TX / RX ' +
+                     'airtime divided by uptime since the node last booted. The radio ' +
+                     'can transmit OR receive, never both. Unlike a managed repeater ' +
+                     '(which reports utilisation over the last interval), the companion ' +
+                     'exposes only cumulative airtime, so this is a long-run average and ' +
+                     'will not reflect short recent bursts.',
+          })}</span>
+          <span class="status-dot ${dotBand}"></span>
+        </div>
+        <div class="hero-tile-value">
+          <span class="primary">${totalUsed.toFixed(1)}<span class="unit">%</span></span>
+        </div>
+        <div class="ra-bar-wrap">
+          <meshcore-stacked-bar
+            .segments=${segments}
+            .total=${100}
+            .legend=${'none'}>
+          </meshcore-stacked-bar>
+          <div class="ra-legend">
+            ${txAir
+              ? html`<span class="ra-legend-item" @click=${onTxClick}>
+                  <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
+                </span>`
+              : html`<span class="ra-legend-item">
+                  <span class="legend-swatch tx"></span>TX ${txN.toFixed(1)}%
+                </span>`}
+            ${rxAir
+              ? html`<span class="ra-legend-item" @click=${onRxClick}>
+                  <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
+                </span>`
+              : html`<span class="ra-legend-item">
+                  <span class="legend-swatch rx"></span>RX ${rxN.toFixed(1)}%
+                </span>`}
+            <span class="ra-legend-item">
+              <span class="legend-swatch idle"></span>Idle ${idleN.toFixed(1)}%
+            </span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /** Read an uptime entity's value and normalise to minutes using its
+   *  reported unit (companion uptime is days; other flavours may be h/min/s).
+   *  Mirrors the unit handling in _evaluateForRow's uptime branch. */
+  private _readUptimeMinutes(info: EntityInfo): number {
+    const raw = this._readNumber(info.entity_id);
+    if (!Number.isFinite(raw)) return NaN;
+    const unit = (this.hass?.states[info.entity_id]?.attributes
+                  ?.unit_of_measurement as string) ?? '';
+    switch (unit) {
+      case 'd':   return raw * 1440;
+      case 'h':   return raw * 60;
+      case 'min': return raw;
+      case 's':   return raw / 60;
+      default:    return raw / 60; // assume seconds when the unit is unknown
+    }
   }
 
   // ─── Sensor table grouping ────────────────────────────────────────────

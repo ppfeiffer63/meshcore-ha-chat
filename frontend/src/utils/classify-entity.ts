@@ -180,6 +180,17 @@ export function classifyEntity(entity: any): EntityInfo | null {
              colorScheme: 'neutral', sortOrder: 12,
              metricKey: 'tx_queue_len' };
   }
+  // Plain device error counter (STATS_CORE `errors`) from the companion's
+  // self-diagnostics. The guard excludes `recv_errors` (handled by the
+  // generic path / surfaced as the companion RX-error annotation). Only the
+  // companion exposes a bare `_errors_` entity -- repeaters have recv_errors
+  // only -- so this branch never reclassifies a repeater entity. sortOrder 12
+  // routes it into the "Radio · live" group, which (unlike the Identity
+  // catch-all) is not skipped on the companion card.
+  if (eid.includes('errors') && !eid.includes('recv_errors')) {
+    return { entity_id: eid, label: 'Errors', icon: 'counter',
+             colorScheme: 'neutral', sortOrder: 12 };
+  }
   if (eid.includes('contact_count')) {
     return { entity_id: eid, label: 'Contacts', icon: 'counter',
              colorScheme: 'neutral', sortOrder: 8 };
