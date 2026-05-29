@@ -165,20 +165,18 @@ describe('node-summary companion hero — Self Diagnostics ENABLED', () => {
     expect(text).toMatch(/TX 0\.0%/);
   });
 
-  it('surfaces recv_errors as a "+N err" legend item and a red error line', () => {
-    // recv_errors 638 / (nb_recv 3272 + 638) = 16.3%.
+  it('surfaces recv_errors as an "Error N" legend item and a red error line', () => {
+    // recv_errors 638 / nb_recv 3272 = 19.5% (share of received messages).
     const errLine = el.shadowRoot?.querySelector('.err-line') as HTMLElement | null;
     expect(errLine).toBeTruthy();
     const title = errLine?.getAttribute('title') ?? '';
     expect(title).toContain('638');
-    expect(title).toContain('16.3% of RX');
-    // The "+638 err" legend rides on the Received tile's stacked-bar
-    // (its own shadow DOM, so read the property rather than textContent).
-    const bars = Array.from(
-      el.shadowRoot?.querySelectorAll('meshcore-stacked-bar') ?? [],
-    ) as Array<{ extraLegendText?: string }>;
-    const errBar = bars.find((b) => (b.extraLegendText ?? '').includes('err'));
-    expect(errBar?.extraLegendText).toContain('+638 err');
+    expect(title).toContain('19.5% of received');
+    // The count appears in the unified legend (node-summary's own shadow DOM).
+    const legend = el.shadowRoot?.querySelector('.msg-legend');
+    expect(legend?.textContent).toContain('Error 638');
+    // "Other" was removed from the composition legend.
+    expect(legend?.textContent).not.toContain('Other');
   });
 
   it('no longer shows the per-tile msg/min rate text', () => {

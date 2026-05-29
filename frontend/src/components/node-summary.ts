@@ -322,6 +322,46 @@ export class NodeSummary extends LitElement {
       height: 100%;
       background: var(--bad, #f44336);
     }
+    /* Duplicates line — same thin track, amber fill, stacked under the
+       error line. */
+    .dup-line {
+      height: 3px;
+      width: 100%;
+      margin-top: 2px;
+      background: var(--divider-color, #e0e0e0);
+      border-radius: 2px;
+      overflow: hidden;
+      cursor: help;
+    }
+    .dup-line-fill {
+      height: 100%;
+      background: var(--warning, #ff9800);
+    }
+    /* Unified legend beneath the Messages Received bar stack. */
+    .msg-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 10px;
+      margin-top: 5px;
+      font-size: 10px;
+      color: var(--secondary-text-color);
+    }
+    .msg-legend > span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+    .msg-swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .msg-swatch.flood  { background: var(--info, #2196f3); }
+    .msg-swatch.direct { background: var(--good, #4caf50); }
+    .msg-swatch.error  { background: var(--bad, #f44336); }
+    .msg-swatch.dup    { background: var(--warning, #ff9800); }
   `;
 
   // ─── Render ────────────────────────────────────────────────────────────
@@ -638,11 +678,9 @@ export class NodeSummary extends LitElement {
     const totalSent = this._readNumber(nbSent.entity_id);
     const flood = sentFlood ? this._readNumber(sentFlood.entity_id) : 0;
     const direct = sentDirect ? this._readNumber(sentDirect.entity_id) : 0;
-    const other = Math.max(0, totalSent - flood - direct);
     const segs: StackedBarSegment[] = [
       { value: flood,  label: `Flood ${flood}`,   kind: 'flood' },
       { value: direct, label: `Direct ${direct}`, kind: 'direct' },
-      { value: other,  label: `Other ${other}`,   kind: 'other' },
     ];
     consumed.add(nbSent.entity_id);
     if (sentFlood) consumed.add(sentFlood.entity_id);
@@ -655,14 +693,9 @@ export class NodeSummary extends LitElement {
             band: 'info',
             fillPct: 0,
             tooltip:
-              'Messages sent (lifetime). Bar segmented by send mode:\n' +
+              'Messages sent (lifetime), split by send mode:\n' +
               '• Flood — broadcast retransmits visible to all neighbours.\n' +
-              '• Direct — routed point-to-point along a path.\n' +
-              '• Other — any sent packet counted in the total but not ' +
-              'classified (typically 0; the firmware design reconciles ' +
-              'flood + direct with nb_sent). Non-zero "Other" suggests a ' +
-              'firmware version that emits packet types this UI does not ' +
-              'yet recognise.',
+              '• Direct — routed point-to-point along a path.',
           })}</span>
           <span class="status-dot info"></span>
         </div>
@@ -688,11 +721,9 @@ export class NodeSummary extends LitElement {
     const totalRecv = this._readNumber(nbRecv.entity_id);
     const flood = recvFlood ? this._readNumber(recvFlood.entity_id) : 0;
     const direct = recvDirect ? this._readNumber(recvDirect.entity_id) : 0;
-    const other = Math.max(0, totalRecv - flood - direct);
     const segs: StackedBarSegment[] = [
       { value: flood,  label: `Flood ${flood}`,   kind: 'flood' },
       { value: direct, label: `Direct ${direct}`, kind: 'direct' },
-      { value: other,  label: `Other ${other}`,   kind: 'other' },
     ];
 
     const fdups = floodDups ? this._readNumber(floodDups.entity_id) : 0;
@@ -708,20 +739,18 @@ export class NodeSummary extends LitElement {
     if (floodDups) consumed.add(floodDups.entity_id);
     if (directDups) consumed.add(directDups.entity_id);
 
-    // recv_errors (STATS_PACKETS counter): surface as a thin red line below
-    // the composition bar plus a "+N err" legend item where the msg/min rate
-    // used to sit -- not a separate table row. Applies to any node that
-    // reports it (companion + managed repeater). Lifetime error share =
-    // recv_errors / (recv_errors + nb_recv).
+    // recv_errors (STATS_PACKETS counter): surfaced as a thin red line in the
+    // bar stack plus an "Error N" legend item -- not a separate table row.
+    // Applies to any node that reports it (companion + managed repeater).
+    // Error / duplicate shares are expressed relative to received messages
+    // (nb_recv) so the bars line up with the composition bar above them.
     const recvErrorsInfo = this._findEntityIdMatching('recv_errors');
     const recvErrorsRaw = recvErrorsInfo
       ? this._readNumber(recvErrorsInfo.entity_id)
       : NaN;
     const recvErrorsN = Number.isFinite(recvErrorsRaw) ? recvErrorsRaw : 0;
-    const errDenom = totalRecv + recvErrorsN;
-    const errRatio = errDenom > 0 ? (recvErrorsN / errDenom) * 100 : 0;
+    const errRatio = totalRecv > 0 ? (recvErrorsN / totalRecv) * 100 : 0;
     if (recvErrorsInfo) consumed.add(recvErrorsInfo.entity_id);
-    const errLegend = recvErrorsN > 0 ? `+${this._formatCount(recvErrorsN)} err` : undefined;
 
     return html`
       <div class="hero-tile" @click=${() => this._fireMoreInfo(nbRecv.entity_id)}>
@@ -730,21 +759,15 @@ export class NodeSummary extends LitElement {
             band: 'info',
             fillPct: 0,
             tooltip:
-              'Messages received (lifetime). Bar segmented by receive mode:\n' +
+              'Messages received (lifetime), split by receive mode:\n' +
               '• Flood — broadcast packets received from neighbours.\n' +
-              '• Direct — routed packets where this repeater is on the path.\n' +
-              '• Other — any received packet counted in the total but not ' +
-              'classified (typically 0; nb_recv normally reconciles with ' +
-              'recv_flood + recv_direct). Non-zero "Other" suggests a ' +
-              'firmware version that emits packet types this UI does not ' +
-              'yet recognise.\n\n' +
-              'Duplicates are tracked separately and do NOT contribute to ' +
-              'the total — they appear as an annotation. Dup ratio is ' +
-              'shown for context only, not banded: in a flooding mesh ' +
-              'every active neighbour retransmits the same flood once, so ' +
-              'a 2-neighbour repeater sees roughly 50% dup ratio, a ' +
-              '3-neighbour repeater ~67%, etc. Without knowing the ' +
-              'neighbour count there is no honest threshold to flag.',
+              '• Direct — routed packets where this node is on the path.\n\n' +
+              'Beneath the composition bar: a red line = receive errors and ' +
+              'an amber line = duplicate receptions, each as a share of ' +
+              'received messages. Both are context only, not banded — in a ' +
+              'flooding mesh every active neighbour retransmits the same ' +
+              'flood once, so a high duplicate ratio is normal (a 2-neighbour ' +
+              'repeater sees ~50%, a 3-neighbour ~67%, etc.).',
           })}</span>
           <span class="status-dot info"></span>
         </div>
@@ -753,22 +776,30 @@ export class NodeSummary extends LitElement {
         </div>
         <meshcore-stacked-bar
           .segments=${segs}
-          .legend=${'inline'}
-          .extraLegendText=${errLegend ?? ''}>
+          .legend=${'none'}>
         </meshcore-stacked-bar>
         ${recvErrorsN > 0
           ? html`<div class="err-line"
-                      title="Receive errors: ${recvErrorsN} (${errRatio.toFixed(1)}% of RX attempts)">
+                      title="Receive errors: ${recvErrorsN} (${errRatio.toFixed(1)}% of received)">
               <div class="err-line-fill" style="width:${Math.min(100, errRatio).toFixed(1)}%"></div>
             </div>`
           : nothing}
         ${totalDups > 0
-          ? html`<div class="dup-annotation">
-              + <span class="num">${totalDups}</span>
-              duplicate${totalDups === 1 ? '' : 's'}
-              (${dupRatio.toFixed(1)}% of recv)
+          ? html`<div class="dup-line"
+                      title="Duplicates: ${totalDups} (${dupRatio.toFixed(1)}% of received)">
+              <div class="dup-line-fill" style="width:${Math.min(100, dupRatio).toFixed(1)}%"></div>
             </div>`
           : nothing}
+        <div class="msg-legend">
+          <span><span class="msg-swatch flood"></span>Flood ${flood}</span>
+          <span><span class="msg-swatch direct"></span>Direct ${direct}</span>
+          ${recvErrorsN > 0
+            ? html`<span><span class="msg-swatch error"></span>Error ${recvErrorsN}</span>`
+            : nothing}
+          ${totalDups > 0
+            ? html`<span><span class="msg-swatch dup"></span>Dup ${totalDups}</span>`
+            : nothing}
+        </div>
       </div>
     `;
   }
