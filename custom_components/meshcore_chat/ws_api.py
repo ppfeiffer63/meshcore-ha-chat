@@ -678,12 +678,18 @@ async def ws_clear_discovered_contacts(
         from homeassistant.helpers import entity_registry as er
         entity_registry = er.async_get(hass)
         removed = len(coordinator._discovered_contacts)
+        entry_id = coordinator.config_entry.entry_id
 
         for public_key in list(coordinator._discovered_contacts.keys()):
             pubkey_prefix = public_key[:12]
-            coordinator.tracked_diagnostic_binary_contacts.discard(pubkey_prefix)
+            # The tracked set holds the FULL public key, and the integration
+            # registers each contact binary_sensor with unique_id
+            # f"{entry_id}_contact_{pubkey[:12]}" (meshcore binary_sensor.py).
+            coordinator.tracked_diagnostic_binary_contacts.discard(public_key)
             entity_id = entity_registry.async_get_entity_id(
-                "binary_sensor", MESHCORE_DOMAIN, pubkey_prefix
+                "binary_sensor",
+                MESHCORE_DOMAIN,
+                f"{entry_id}_contact_{pubkey_prefix}",
             )
             if entity_id:
                 entity_registry.async_remove(entity_id)
@@ -2306,6 +2312,51 @@ async def ws_add_contact(hass, connection, msg):
             connection.send_error(msg["id"], "not_connected", "Device not connected")
             return
 
+        # Route the node mutation + coordinator sync through the meshcore
+        # integration WHEN it owns the routed contact handling; otherwise fall
+        # back to the existing inlined block below. Entity creation for the new
+        # contact lives in the integration's NEW_CONTACT handler on both paths.
+        if _integration_supports_routed_contact_cleanup(hass):
+            prefix = (contact_data.get("public_key") or public_key)[:12]
+            try:
+                response = await hass.services.async_call(
+                    MESHCORE_DOMAIN,
+                    "execute_command",
+                    {
+                        "command": f"add_contact {prefix}",
+                        "entry_id": coordinator.config_entry.entry_id,
+                    },
+                    blocking=True,
+                    return_response=True,
+                )
+            except Exception as ex:
+                _ws_send_error_safe(
+                    connection, msg["id"], ex, handler="ws_add_contact"
+                )
+                return
+            # execute_command returns the SDK result payload (or None when the
+            # result carried no payload — including a bodyless OK). A radio-side
+            # failure surfaces as a dict carrying a failure marker: "reason"
+            # (timeout / no_event_received), "error_code" (device-reported
+            # error), or "error" (exception string). Map those to the same
+            # command_failed the inlined path returns. A None or marker-less
+            # payload is treated as success.
+            if isinstance(response, dict) and (
+                "reason" in response
+                or "error_code" in response
+                or "error" in response
+            ):
+                connection.send_error(
+                    msg["id"],
+                    "command_failed",
+                    f"add_contact failed: {response}",
+                )
+                return
+            connection.send_result(msg["id"], {"success": True})
+            return
+
+        # Fallback — inlined SDK add + manual coordinator sync. Correct on
+        # integrations without the routed contact handling.
         result = await api.mesh_core.commands.add_contact(contact_data)
 
         from meshcore.events import EventType
