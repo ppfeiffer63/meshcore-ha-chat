@@ -23,7 +23,9 @@ load altogether.
 from __future__ import annotations
 
 import asyncio
+import enum
 import sys
+import types
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -3043,3 +3045,173 @@ async def test_get_messages_around_anchor_at_tail(
     assert payload["messages"][-1]["id"] == "msg_099"
 
     await entry.runtime_data.store.async_unload()
+
+
+# ─── ws_remove_contact — capability-gated routing ───────────────────────
+
+_RC_PREFIX = "aabbccddeeff"
+_RC_FULL_PK = _RC_PREFIX + "00" * 26  # 12-hex prefix + padding → 64-hex pubkey
+
+
+def test_integration_supports_routed_contact_cleanup_tracks_has_service(
+    hass: HomeAssistant,
+) -> None:
+    """The capability probe mirrors has_service(meshcore, get_discovered_contact)."""
+    with patch(
+        "homeassistant.core.ServiceRegistry.has_service", return_value=True
+    ):
+        assert ws_api._integration_supports_routed_contact_cleanup(hass) is True
+    with patch(
+        "homeassistant.core.ServiceRegistry.has_service", return_value=False
+    ):
+        assert ws_api._integration_supports_routed_contact_cleanup(hass) is False
+
+
+async def test_ws_remove_contact_routes_when_gate_open(
+    hass: HomeAssistant, coordinator: MagicMock
+) -> None:
+    """Gate open → delegates to meshcore.execute_command; the SDK is not called
+    directly; an empty-OK (None) response maps to the success envelope."""
+    coordinator._contacts = {_RC_PREFIX: {"public_key": _RC_FULL_PK}}
+    calls: list[tuple[Any, ...]] = []
+
+    async def _fake_call(domain, service, data=None, **kwargs):
+        calls.append((domain, service, data, kwargs))
+        return None  # remove_contact OK is bodyless → execute_command returns None
+
+    with (
+        patch("homeassistant.core.ServiceRegistry.has_service", return_value=True),
+        patch(
+            "homeassistant.core.ServiceRegistry.async_call", side_effect=_fake_call
+        ),
+    ):
+        conn = _Connection()
+        await _call_ws(
+            ws_api.ws_remove_contact,
+            hass,
+            conn,
+            {"id": 1, "entry_id": "meshcore_entry", "public_key": _RC_FULL_PK},
+        )
+
+    assert conn.results == [(1, {"success": True})]
+    assert not conn.errors
+    assert any(
+        c[0] == MESHCORE_DOMAIN
+        and c[1] == "execute_command"
+        and c[2]["command"] == f"remove_contact {_RC_PREFIX}"
+        and c[2]["entry_id"] == "meshcore_entry"
+        and c[3].get("return_response") is True
+        for c in calls
+    )
+    # routed path must not touch the SDK remove directly
+    coordinator.api.mesh_core.commands.remove_contact.assert_not_called()
+
+
+async def test_ws_remove_contact_routed_timeout_maps_command_failed(
+    hass: HomeAssistant, coordinator: MagicMock
+) -> None:
+    """Gate open, execute_command returns a timeout marker → command_failed."""
+    coordinator._contacts = {_RC_PREFIX: {"public_key": _RC_FULL_PK}}
+
+    async def _fake_call(*args, **kwargs):
+        return {"reason": "timeout"}
+
+    with (
+        patch("homeassistant.core.ServiceRegistry.has_service", return_value=True),
+        patch(
+            "homeassistant.core.ServiceRegistry.async_call", side_effect=_fake_call
+        ),
+    ):
+        conn = _Connection()
+        await _call_ws(
+            ws_api.ws_remove_contact,
+            hass,
+            conn,
+            {"id": 1, "entry_id": "meshcore_entry", "public_key": _RC_FULL_PK},
+        )
+
+    assert not conn.results
+    assert conn.errors and conn.errors[0][1] == "command_failed"
+
+
+async def test_ws_remove_contact_routed_error_code_maps_command_failed(
+    hass: HomeAssistant, coordinator: MagicMock
+) -> None:
+    """Gate open, execute_command returns a device error_code → command_failed."""
+    coordinator._contacts = {_RC_PREFIX: {"public_key": _RC_FULL_PK}}
+
+    async def _fake_call(*args, **kwargs):
+        return {"error_code": 1}
+
+    with (
+        patch("homeassistant.core.ServiceRegistry.has_service", return_value=True),
+        patch(
+            "homeassistant.core.ServiceRegistry.async_call", side_effect=_fake_call
+        ),
+    ):
+        conn = _Connection()
+        await _call_ws(
+            ws_api.ws_remove_contact,
+            hass,
+            conn,
+            {"id": 1, "entry_id": "meshcore_entry", "public_key": _RC_FULL_PK},
+        )
+
+    assert not conn.results
+    assert conn.errors and conn.errors[0][1] == "command_failed"
+
+
+async def test_ws_remove_contact_inlined_fallback_when_gate_closed(
+    hass: HomeAssistant, coordinator: MagicMock
+) -> None:
+    """Gate closed → inlined SDK remove + manual coordinator sync;
+    execute_command is NOT called, and the contact leaves the coordinator dict."""
+    coordinator._contacts = {_RC_PREFIX: {"public_key": _RC_FULL_PK}}
+    coordinator.api.mesh_core._contacts = {_RC_FULL_PK: {}}
+
+    # The fallback path lazily does ``from meshcore.events import EventType``;
+    # the SDK is not installed in the chat test venv, so stub the module with
+    # an EventType carrying the OK/ERROR members the handler compares against.
+    fake_events = types.ModuleType("meshcore.events")
+
+    class _EventType(enum.Enum):
+        OK = "OK"
+        ERROR = "ERROR"
+
+    fake_events.EventType = _EventType
+    fake_meshcore = types.ModuleType("meshcore")
+    fake_meshcore.events = fake_events
+
+    ok_result = MagicMock()
+    ok_result.type = _EventType.OK
+    coordinator.api.mesh_core.commands.remove_contact = AsyncMock(
+        return_value=ok_result
+    )
+
+    async def _fail_if_called(*args, **kwargs):
+        raise AssertionError("execute_command must not run when the gate is closed")
+
+    with (
+        patch.dict(
+            sys.modules,
+            {"meshcore": fake_meshcore, "meshcore.events": fake_events},
+        ),
+        patch("homeassistant.core.ServiceRegistry.has_service", return_value=False),
+        patch(
+            "homeassistant.core.ServiceRegistry.async_call",
+            side_effect=_fail_if_called,
+        ),
+    ):
+        conn = _Connection()
+        await _call_ws(
+            ws_api.ws_remove_contact,
+            hass,
+            conn,
+            {"id": 1, "entry_id": "meshcore_entry", "public_key": _RC_FULL_PK},
+        )
+
+    assert conn.results == [(1, {"success": True})]
+    assert not conn.errors
+    coordinator.api.mesh_core.commands.remove_contact.assert_awaited_once()
+    # inlined sync removed the contact from the coordinator dict
+    assert _RC_PREFIX not in coordinator._contacts

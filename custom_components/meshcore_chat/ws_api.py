@@ -208,6 +208,21 @@ def _get_all_coordinators(hass: HomeAssistant) -> list:
     return coords
 
 
+def _integration_supports_routed_contact_cleanup(hass: HomeAssistant) -> bool:
+    """True when the installed meshcore integration owns the routed contact
+    cleanup — i.e. its ``remove_contact`` handler also removes the per-contact
+    ``binary_sensor`` (and discards the pubkey) on large-mesh installs.
+
+    Probed via the presence of the ``meshcore.get_discovered_contact``
+    service, which is registered by the same integration build that carries
+    the routed cleanup. When the probe is false, callers fall back to their
+    own inlined SDK mutation + coordinator sync, which is correct on
+    integrations without the large-mesh entity lifecycle (no per-contact
+    ``binary_sensor`` exists there to orphan).
+    """
+    return hass.services.has_service(MESHCORE_DOMAIN, "get_discovered_contact")
+
+
 # Maps Python exception types to WS error codes + translation keys.
 # Order matters — first match wins. Add new entries above the catch-all
 # in ``_ws_send_error_safe`` to surface specific failures before they
@@ -2368,6 +2383,51 @@ async def ws_remove_contact(hass, connection, msg):
             connection.send_error(msg["id"], "not_connected", "Device not connected")
             return
 
+        # Route the node mutation + coordinator sync + (large-mesh) entity
+        # cleanup through the meshcore integration WHEN it owns the routed
+        # cleanup; otherwise fall back to the existing inlined block below
+        # (correct for integrations without large-mesh — no entity to orphan).
+        if _integration_supports_routed_contact_cleanup(hass):
+            try:
+                response = await hass.services.async_call(
+                    MESHCORE_DOMAIN,
+                    "execute_command",
+                    {
+                        "command": f"remove_contact {prefix}",
+                        "entry_id": coordinator.config_entry.entry_id,
+                    },
+                    blocking=True,
+                    return_response=True,
+                )
+            except Exception as ex:
+                _ws_send_error_safe(
+                    connection, msg["id"], ex, handler="ws_remove_contact"
+                )
+                return
+            # execute_command returns the SDK result payload (or None when the
+            # result carried no payload — including a bodyless OK). A radio-side
+            # failure surfaces as a dict carrying a failure marker: "reason"
+            # (timeout / no_event_received), "error_code" (device-reported
+            # error), or "error" (exception string). Map those to the same
+            # command_failed the inlined path returns. A None or marker-less
+            # payload is treated as success.
+            if isinstance(response, dict) and (
+                "reason" in response
+                or "error_code" in response
+                or "error" in response
+            ):
+                connection.send_error(
+                    msg["id"],
+                    "command_failed",
+                    f"remove_contact failed: {response}",
+                )
+                return
+            connection.send_result(msg["id"], {"success": True})
+            return
+
+        # Fallback — inlined SDK remove + manual coordinator sync. Correct on
+        # integrations without the routed entity cleanup (no per-contact
+        # binary_sensor exists there to orphan).
         result = await api.mesh_core.commands.remove_contact(contact_data)
 
         from meshcore.events import EventType
