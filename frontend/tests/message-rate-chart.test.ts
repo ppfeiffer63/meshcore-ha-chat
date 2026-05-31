@@ -12,6 +12,7 @@ type Chart = HTMLElement & {
   // drive the hover state directly rather than dispatching pointer events)
   _hoverIndex: number | null;
   _nearestBucket: (svgX: number) => number;
+  _onPointerLeave: (e: PointerEvent) => void;
   requestUpdate: () => void;
 };
 
@@ -109,6 +110,23 @@ describe('message-rate-chart', () => {
     await el.updateComplete;
     const text = el.shadowRoot?.querySelector('.tooltip')?.textContent ?? '';
     expect(text).toContain('—');
+  });
+
+  it('keeps the tooltip open when a touch pointer leaves, dismisses on mouse-out', async () => {
+    const ts = Date.now();
+    el = await mount([
+      { timestamp: ts - 3_600_000, values: { sent_flood: 1 } },
+      { timestamp: ts, values: { sent_flood: 1 } },
+    ]);
+    el._hoverIndex = 1;
+
+    // A touch tap fires pointerleave the instant the finger lifts — must NOT close.
+    el._onPointerLeave({ pointerType: 'touch' } as PointerEvent);
+    expect(el._hoverIndex).toBe(1);
+
+    // Mouse leaving the chart still dismisses (desktop hover behavior).
+    el._onPointerLeave({ pointerType: 'mouse' } as PointerEvent);
+    expect(el._hoverIndex).toBeNull();
   });
 
   it('_nearestBucket snaps to the closest point by x', async () => {

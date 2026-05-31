@@ -203,8 +203,12 @@ export class MessageRateChart extends LitElement {
     this._hoverIndex = idx === this._hoverIndex ? null : idx;
   };
 
-  private _onPointerLeave = () => {
-    this._hoverIndex = null;
+  private _onPointerLeave = (e: PointerEvent) => {
+    // On touch, pointerleave fires the instant the finger lifts, which would
+    // close the tooltip on a normal tap. Dismiss only on mouse-out; a touch
+    // tap leaves the tooltip open until the user taps the same column again
+    // (toggle) or taps another column.
+    if (e.pointerType === 'mouse') this._hoverIndex = null;
   };
 
   private _renderChart() {
