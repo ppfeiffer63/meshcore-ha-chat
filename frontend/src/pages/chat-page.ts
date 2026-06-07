@@ -203,6 +203,10 @@ export class ChatPage extends LitElement {
     .send-button svg {
       width: 20px;
       height: 20px;
+      /* Optical centering: the right-pointing icon's visual mass sits
+         ~2px left of its bounding-box center at this size, so a
+         geometrically centered glyph reads as shifted left. */
+      transform: translateX(2px);
     }
 
     .empty-state {
