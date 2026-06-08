@@ -149,7 +149,7 @@ export const LOCAL_COMMANDS: CommandDef[] = [
   // ========================
   {
     name: 'set_radio.rxgain',
-    description: 'Set RX boosted gain mode (SX1262/SX1268 only, v1.14.1+)',
+    description: 'Set RX boosted gain mode (SX1262/SX1268; also LR1110 v1.16.0+)',
     category: 'Radio Settings',
     params: [
       {

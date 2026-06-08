@@ -160,7 +160,7 @@ export const REMOTE_COMMANDS: CommandDef[] = [
     name: 'get flood.advert.interval',
     description: 'Get flood advertisement interval (hours)',
     category: 'Network',
-    responseFormat: '> interval in hours (example: 12)',
+    responseFormat: '> interval in hours (example: 47; firmware default 47 since v1.16.0)',
     remoteOnly: true,
   },
   {
@@ -249,7 +249,7 @@ export const REMOTE_COMMANDS: CommandDef[] = [
   },
   {
     name: 'get radio.rxgain',
-    description: 'Get RX boosted gain mode (SX1262/SX1268 only, v1.14.1+)',
+    description: 'Get RX boosted gain mode (SX1262/SX1268; also LR1110 v1.16.0+)',
     category: 'Radio Settings',
     responseFormat: '> on or off',
     remoteOnly: true,
@@ -699,7 +699,7 @@ export const REMOTE_COMMANDS: CommandDef[] = [
   },
   {
     name: 'set radio.rxgain',
-    description: 'Set RX boosted gain mode (SX1262/SX1268 only, v1.14.1+)',
+    description: 'Set RX boosted gain mode (SX1262/SX1268; also LR1110 v1.16.0+)',
     category: 'Radio Settings',
     params: [
       {
