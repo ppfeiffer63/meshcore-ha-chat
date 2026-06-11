@@ -186,7 +186,19 @@ class MessageStore:
             return self._loaded_conversations[entity_id]
 
         stored = await self._store_for(entity_id).async_load()
-        messages: list[dict] = stored or []
+        
+        # Validate loaded data is a list
+        if not isinstance(stored, list):
+            _LOGGER.error(
+                "Invalid stored messages for %s: expected list, got %s; "
+                "starting with empty conversation",
+                entity_id,
+                type(stored).__name__ if stored is not None else "None",
+            )
+            messages: list[dict] = []
+        else:
+            messages = stored
+        
         # One-time backfill on first load — enriches old records that pre-date
         # the rx_log/delivery-status fixes. Persists on next save.
         if messages and _backfill_messages(messages):
@@ -533,12 +545,23 @@ class MessageStore:
             return
         store = self._conversation_stores.get(entity_id)
         if store is None:
+            _LOGGER.warning(
+                "Store for %s was unexpectedly None; skipping save",
+                entity_id
+            )
             return
         try:
             await store.async_save(self._loaded_conversations[entity_id])
+            # Only clear dirty on success
             self._conversation_dirty.discard(entity_id)
+            _LOGGER.debug("Saved conversation %s successfully", entity_id)
         except Exception as ex:  # pragma: no cover - defensive
-            _LOGGER.error("Error saving conversation %s: %s", entity_id, ex)
+            # Keep in dirty set so retry happens later
+            _LOGGER.error(
+                "Error saving conversation %s (will retry): %s",
+                entity_id,
+                ex
+            )
 
     def _schedule_index_save(self) -> None:
         """Debounce index store writes."""
@@ -608,6 +631,8 @@ class MessageStore:
             self._eviction_timer.cancel()
             self._eviction_timer = None
 
+        errors: list[tuple[str, Exception]] = []
+
         # Save all dirty conversations.
         for entity_id in list(self._conversation_dirty):
             if entity_id in self._loaded_conversations:
@@ -619,15 +644,29 @@ class MessageStore:
                         )
                     except Exception as ex:  # pragma: no cover - defensive
                         _LOGGER.error(
-                            "Error flushing conversation %s: %s", entity_id, ex
+                            "Error flushing conversation %s: %s",
+                            entity_id,
+                            ex,
                         )
-        self._conversation_dirty.clear()
+                        errors.append((entity_id, ex))
 
         # Save index.
         try:
             await self._message_index_store.async_save(self._message_index)
         except Exception as ex:  # pragma: no cover - defensive
             _LOGGER.error("Error flushing message index: %s", ex)
+            errors.append(("index", ex))
+
+        # Only clear dirty state if all saves succeeded
+        if not errors:
+            self._conversation_dirty.clear()
+            _LOGGER.debug("MessageStore flush completed successfully")
+        else:
+            _LOGGER.warning(
+                "MessageStore flush completed with %d error(s); "
+                "dirty set retained for next flush attempt",
+                len(errors),
+            )
 
     async def cleanup_old_messages(self) -> None:
         """Remove messages older than the retention window.
@@ -663,7 +702,17 @@ class MessageStore:
             # Not cached — load transiently, prune, save, discard.
             store = self._store_for(entity_id)
             stored = await store.async_load()
-            messages = stored or []
+            
+            # Validate the loaded data
+            if not isinstance(stored, list):
+                _LOGGER.warning(
+                    "Skipping cleanup for %s: invalid stored format (%s)",
+                    entity_id,
+                    type(stored).__name__ if stored is not None else "None",
+                )
+                continue
+            
+            messages = stored
             original_count = len(messages)
             messages = [
                 m for m in messages if m.get("timestamp", "") > cutoff_iso
@@ -672,11 +721,21 @@ class MessageStore:
 
             if trimmed > 0:
                 total_pruned += trimmed
-                await store.async_save(messages)
-                if messages:
-                    self._message_index[entity_id]["message_count"] = len(messages)
-                else:
-                    del self._message_index[entity_id]
+                try:
+                    await store.async_save(messages)
+                    # Update index only after successful save
+                    if messages:
+                        self._message_index[entity_id]["message_count"] = len(messages)
+                    else:
+                        del self._message_index[entity_id]
+                    # Schedule index save to persist changes
+                    self._schedule_index_save()
+                except Exception as ex:
+                    _LOGGER.error(
+                        "Error saving pruned messages for %s: %s; skipping index update",
+                        entity_id,
+                        ex
+                    )
 
         if total_pruned > 0:
             _LOGGER.info(
