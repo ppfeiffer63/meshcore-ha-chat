@@ -1236,15 +1236,33 @@ async def ws_set_device_config(hass, connection, msg):
 
         # Handle tx_power setting
         if "tx_power" in settings:
-            await coordinator.api.mesh_core.commands.set_tx_power(settings["tx_power"])
-            changed.append("tx_power")
+            try:
+                await coordinator.api.mesh_core.commands.set_tx_power(settings["tx_power"])
+                changed.append("tx_power")
+            except Exception as ex:
+                _LOGGER.error("Failed to set tx_power: %s", ex)
+                connection.send_error(
+                    msg["id"],
+                    "command_failed",
+                    f"Failed to set tx_power: {str(ex)}",
+                )
+                return
 
         # Handle coordinates setting
         if "latitude" in settings and "longitude" in settings:
-            await coordinator.api.mesh_core.commands.set_coords(
-                settings["latitude"], settings["longitude"]
-            )
-            changed.append("coords")
+            try:
+                await coordinator.api.mesh_core.commands.set_coords(
+                    settings["latitude"], settings["longitude"]
+                )
+                changed.append("coords")
+            except Exception as ex:
+                _LOGGER.error("Failed to set coordinates: %s", ex)
+                connection.send_error(
+                    msg["id"],
+                    "command_failed",
+                    f"Failed to set coordinates: {str(ex)}",
+                )
+                return
 
         # Handle radio settings - all four must be provided together
         radio_keys = {"frequency", "bandwidth", "spreading_factor", "coding_rate"}
@@ -1257,15 +1275,33 @@ async def ws_set_device_config(hass, connection, msg):
             cr = settings.get("coding_rate", self_info.get("radio_cr"))
 
             if all(v is not None for v in [freq, bw, sf, cr]):
-                await coordinator.api.mesh_core.commands.set_radio(freq, bw, sf, cr)
-                changed.extend([k for k in radio_keys if k in settings])
+                try:
+                    await coordinator.api.mesh_core.commands.set_radio(freq, bw, sf, cr)
+                    changed.extend([k for k in radio_keys if k in settings])
+                except Exception as ex:
+                    _LOGGER.error("Failed to set radio settings: %s", ex)
+                    connection.send_error(
+                        msg["id"],
+                        "command_failed",
+                        f"Failed to set radio settings: {str(ex)}",
+                    )
+                    return
             else:
                 _LOGGER.warning("Cannot set radio: missing current values for unset params")
 
         # Handle path_hash_mode
         if "path_hash_mode" in settings:
-            await coordinator.api.mesh_core.commands.set_path_hash_mode(settings["path_hash_mode"])
-            changed.append("path_hash_mode")
+            try:
+                await coordinator.api.mesh_core.commands.set_path_hash_mode(settings["path_hash_mode"])
+                changed.append("path_hash_mode")
+            except Exception as ex:
+                _LOGGER.error("Failed to set path_hash_mode: %s", ex)
+                connection.send_error(
+                    msg["id"],
+                    "command_failed",
+                    f"Failed to set path_hash_mode: {str(ex)}",
+                )
+                return
 
         # Refresh self_info cache so subsequent reads return updated values
         if changed:
