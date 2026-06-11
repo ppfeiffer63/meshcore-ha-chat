@@ -1635,17 +1635,46 @@ async def ws_remove_channel(hass, connection, msg):
         result = await coordinator.api.mesh_core.commands.set_channel(
             channel_idx, "", None
         )
+        
+        # result is an Event object with .success attribute, not a dict
+        success = getattr(result, "success", False) if result else False
+        if not success:
+            _LOGGER.error(
+                "remove_channel command failed for channel %d: %s",
+                channel_idx,
+                result or "No response",
+            )
+            connection.send_error(
+                msg["id"],
+                "command_failed",
+                f"Failed to remove channel: {result or 'No response from device'}",
+            )
+            return
 
         # Drop the persisted region scope with the channel — a future
         # channel created in this slot starts unscoped.
         scope_store = _get_channel_scopes(hass)
         if scope_store:
-            await scope_store.async_set(
-                coordinator.config_entry.entry_id, channel_idx, None
-            )
+            try:
+                await scope_store.async_set(
+                    coordinator.config_entry.entry_id, channel_idx, None
+                )
+            except Exception as ex:
+                _LOGGER.warning(
+                    "Failed to clear channel scope for %d: %s; continuing",
+                    channel_idx,
+                    ex,
+                )
 
         # Re-fetch channel info so coordinator state matches the device
-        await coordinator.fetch_all_channel_info()
+        try:
+            await coordinator.fetch_all_channel_info()
+        except Exception as ex:
+            _LOGGER.warning(
+                "Failed to re-fetch channel info after remove: %s; state may be stale",
+                ex,
+            )
+        
         coordinator.async_set_updated_data(coordinator.data)
 
         # Notify listeners (frontend subscribes to refresh its channel list).
