@@ -1522,9 +1522,34 @@ async def ws_set_channel(hass, connection, msg):
             channel_secret = None
 
         # Call set_channel command
-        result = await coordinator.api.mesh_core.commands.set_channel(
-            channel_idx, name, channel_secret
-        )
+        try:
+            result = await coordinator.api.mesh_core.commands.set_channel(
+                channel_idx, name, channel_secret
+            )
+            if not result or not result.get("success"):
+                _LOGGER.error(
+                    "set_channel command failed for channel %d: %s",
+                    channel_idx,
+                    result or "No response",
+                )
+                connection.send_error(
+                    msg["id"],
+                    "command_failed",
+                    f"Failed to set channel: {result or 'No response from device'}",
+                )
+                return
+        except Exception as ex:
+            _LOGGER.error(
+                "set_channel command exception for channel %d: %s",
+                channel_idx,
+                ex,
+            )
+            connection.send_error(
+                msg["id"],
+                "command_failed",
+                f"Failed to set channel: {str(ex)}",
+            )
+            return
 
         # Persist the per-channel region scope alongside the device-side
         # save. The radio's channel slot has no scope field — scope is a
@@ -1536,12 +1561,29 @@ async def ws_set_channel(hass, connection, msg):
         if "scope" in msg:
             scope_store = _get_channel_scopes(hass)
             if scope_store:
-                await scope_store.async_set(
-                    coordinator.config_entry.entry_id, channel_idx, msg["scope"]
-                )
+                try:
+                    await scope_store.async_set(
+                        coordinator.config_entry.entry_id, channel_idx, msg["scope"]
+                    )
+                except Exception as ex:
+                    _LOGGER.warning(
+                        "Failed to persist channel scope for %d: %s; continuing without scope",
+                        channel_idx,
+                        ex,
+                    )
+                    # Don't fail the whole operation if scope persistence fails
+                    # Channel was successfully created, just scope didn't persist
 
         # Re-fetch channel info so coordinator state matches the device
-        await coordinator._fetch_all_channel_info()
+        try:
+            await coordinator._fetch_all_channel_info()
+        except Exception as ex:
+            _LOGGER.warning(
+                "Failed to re-fetch channel info after set_channel: %s; state may be stale",
+                ex,
+            )
+            # Don't fail if refresh fails; channel was created successfully
+
         coordinator.async_set_updated_data(coordinator.data)
 
         # Notify listeners (frontend subscribes to refresh its channel list).
