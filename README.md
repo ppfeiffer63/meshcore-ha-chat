@@ -97,7 +97,7 @@ Works as a **companion** to the [core meshcore integration](https://github.com/m
 Click the badge above to open this repository in your HACS dashboard, or follow the manual steps:
 
 1. In HACS → Integrations → ⋮ → Custom repositories
-2. Add `https://github.com/ppfeiffer63/meshcore-ha-chat` as an "Integration"
+2. Add `https://github.com/mwolter805/meshcore-ha-chat` as an "Integration"
 3. Install **MeshCore Chat**
 4. Restart Home Assistant
 5. Settings → Devices & Services → Add Integration → **MeshCore Chat**
@@ -149,7 +149,7 @@ To uninstall:
 
 ## Development
 
-Contributions and bug reports welcome — file issues at [github.com/ppfeiffer63/meshcore-ha-chat/issues](https://github.com/ppfeiffer63/meshcore-ha-chat/issues).
+Contributions and bug reports welcome — file issues at [github.com/mwolter805/meshcore-ha-chat/issues](https://github.com/mwolter805/meshcore-ha-chat/issues).
 
 ### Repo layout
 
