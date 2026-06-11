@@ -152,7 +152,18 @@ class MessageStore:
         (~100 bytes per conversation), not any conversation message data.
         """
         stored = await self._message_index_store.async_load()
-        self._message_index = stored or {}
+        
+        # Validate index is a dict before using
+        if isinstance(stored, dict):
+            self._message_index = stored
+        else:
+            _LOGGER.error(
+                "Invalid message index format: expected dict, got %s; "
+                "starting with empty index",
+                type(stored).__name__ if stored is not None else "None",
+            )
+            self._message_index = {}
+        
         _LOGGER.debug(
             "MessageStore index loaded: %d conversations tracked",
             len(self._message_index),
