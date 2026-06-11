@@ -1526,7 +1526,9 @@ async def ws_set_channel(hass, connection, msg):
             result = await coordinator.api.mesh_core.commands.set_channel(
                 channel_idx, name, channel_secret
             )
-            if not result or not result.get("success"):
+            # result is an Event object with .success attribute, not a dict
+            success = getattr(result, "success", False) if result else False
+            if not success:
                 _LOGGER.error(
                     "set_channel command failed for channel %d: %s",
                     channel_idx,
@@ -1576,7 +1578,7 @@ async def ws_set_channel(hass, connection, msg):
 
         # Re-fetch channel info so coordinator state matches the device
         try:
-            await coordinator._fetch_all_channel_info()
+            await coordinator.fetch_all_channel_info()
         except Exception as ex:
             _LOGGER.warning(
                 "Failed to re-fetch channel info after set_channel: %s; state may be stale",
@@ -1643,7 +1645,7 @@ async def ws_remove_channel(hass, connection, msg):
             )
 
         # Re-fetch channel info so coordinator state matches the device
-        await coordinator._fetch_all_channel_info()
+        await coordinator.fetch_all_channel_info()
         coordinator.async_set_updated_data(coordinator.data)
 
         # Notify listeners (frontend subscribes to refresh its channel list).
