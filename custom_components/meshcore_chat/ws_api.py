@@ -708,10 +708,12 @@ async def ws_clear_discovered_contacts(
 
         coordinator._discovered_contacts.clear()
 
-        try:
-            await coordinator._store.async_save(coordinator._discovered_contacts)
-        except Exception as ex:
-            _LOGGER.error("Error saving discovered contacts: %s", ex)
+        # NOTE: Do NOT try to save coordinator._store here.
+        # The companion integration does not have access to the upstream
+        # meshcore coordinator's _store. Storage operations must be handled
+        # by the upstream meshcore integration. The coordinator will persist
+        # any state changes through its own save mechanism when
+        # async_set_updated_data is called below.
 
         updated_data = dict(coordinator.data) if coordinator.data else {}
         updated_data["contacts"] = coordinator.get_all_contacts()
