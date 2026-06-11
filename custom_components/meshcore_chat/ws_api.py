@@ -1562,34 +1562,15 @@ async def ws_set_channel(hass, connection, msg):
             result = await coordinator.api.mesh_core.commands.set_channel(
                 channel_idx, name, channel_secret
             )
-            # result is an Event object with .type attribute (EventType.OK, EventType.ERROR, etc.)
-            # Check for errors using EventType matching, not .success attribute
+            # result is an Event object. If it's None, that's an error.
+            # Otherwise EventType.OK with empty payload means success.
+            # (Similar to how send_cmd results are handled in ws_remove_neighbor)
             if result is None:
                 _LOGGER.error("set_channel command returned no response for channel %d", channel_idx)
                 connection.send_error(
                     msg["id"],
                     "command_failed",
                     f"Failed to set channel: No response from device",
-                )
-                return
-            
-            from meshcore.events import EventType
-            if getattr(result, "type", None) == EventType.ERROR:
-                payload = getattr(result, "payload", None) or {}
-                error_msg = (
-                    payload.get("code_string")
-                    or payload.get("error_code")
-                    or "unknown error"
-                )
-                _LOGGER.error(
-                    "set_channel command failed for channel %d: %s",
-                    channel_idx,
-                    error_msg,
-                )
-                connection.send_error(
-                    msg["id"],
-                    "command_failed",
-                    f"Failed to set channel: {error_msg}",
                 )
                 return
         except Exception as ex:
@@ -1688,34 +1669,15 @@ async def ws_remove_channel(hass, connection, msg):
             channel_idx, "", None
         )
         
-        # result is an Event object with .type attribute (EventType.OK, EventType.ERROR, etc.)
-        # Check for errors using EventType matching, not .success attribute
+        # result is an Event object. If it's None, that's an error.
+        # Otherwise EventType.OK with empty payload means success.
+        # (Similar to how send_cmd results are handled in ws_remove_neighbor)
         if result is None:
             _LOGGER.error("remove_channel command returned no response for channel %d", channel_idx)
             connection.send_error(
                 msg["id"],
                 "command_failed",
                 f"Failed to remove channel: No response from device",
-            )
-            return
-        
-        from meshcore.events import EventType
-        if getattr(result, "type", None) == EventType.ERROR:
-            payload = getattr(result, "payload", None) or {}
-            error_msg = (
-                payload.get("code_string")
-                or payload.get("error_code")
-                or "unknown error"
-            )
-            _LOGGER.error(
-                "remove_channel command failed for channel %d: %s",
-                channel_idx,
-                error_msg,
-            )
-            connection.send_error(
-                msg["id"],
-                "command_failed",
-                f"Failed to remove channel: {error_msg}",
             )
             return
 
