@@ -96,4 +96,13 @@ class ChannelScopeStore:
             if not per_entry:
                 del self._scopes[entry_id]
 
-        await self._store.async_save(self._scopes)
+        try:
+            await self._store.async_save(self._scopes)
+        except Exception as ex:
+            _LOGGER.error(
+                "Error saving channel scope for %s[%s] = %s: %s",
+                entry_id,
+                idx_key,
+                scope if scope else "(cleared)",
+                ex,
+            )
