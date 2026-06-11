@@ -91,7 +91,7 @@ rules:
     comment: No entities.
   integration-owner:
     status: done
-    comment: codeowners ["@mwolter805"] in manifest.json.
+    comment: codeowners ["@ppfeiffer63"] in manifest.json.
   log-when-unavailable:
     status: partial
     comment: |
