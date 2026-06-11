@@ -37,3 +37,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+ 
+# Keep upstream files unchanged (only in original repo)
+.github/workflows/validate.yaml
+README.md
+ 
